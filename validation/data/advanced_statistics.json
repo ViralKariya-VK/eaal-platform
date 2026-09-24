@@ -1,0 +1,212 @@
+{
+  "icc": {
+    "S1.1_help_seeking_calibration": {
+      "self_consistency_ICC3k": {
+        "icc": 1.0,
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "p_value": 0.0
+      },
+      "agreement_with_researcher_ICC2": {
+        "icc": 0.9692982456140353,
+        "ci95": [
+          0.86,
+          0.99
+        ],
+        "p_value": 1.0677415451055051e-05
+      }
+    },
+    "S1.2_student_grounding": {
+      "self_consistency_ICC3k": {
+        "icc": 1.0,
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "p_value": 0.0
+      },
+      "agreement_with_researcher_ICC2": {
+        "icc": 0.8755129958960328,
+        "ci95": [
+          0.5,
+          0.97
+        ],
+        "p_value": 0.0014088709417535035
+      }
+    },
+    "S3.1_conceptual_understanding": {
+      "self_consistency_ICC3k": {
+        "icc": 0.9999149948996939,
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "p_value": 5.837091492449002e-34
+      },
+      "agreement_with_researcher_ICC2": {
+        "icc": 0.6843164043590049,
+        "ci95": [
+          -0.2,
+          0.95
+        ],
+        "p_value": 0.05599520144622236
+      }
+    }
+  },
+  "bootstrap_confidence_intervals": {
+    "S1.1_help_seeking_calibration": {
+      "point_estimate": 0.8659771773941028,
+      "asymptotic_p": 0.005429603759903328,
+      "bootstrap_ci95": [
+        0.4707565417620043,
+        0.9931270663228413
+      ],
+      "n_bootstrap_samples_used": 4979
+    },
+    "S1.2_student_grounding": {
+      "point_estimate": 0.8432740427115677,
+      "asymptotic_p": 0.008528352374862226,
+      "bootstrap_ci95": [
+        0.3310423554409472,
+        1.0
+      ],
+      "n_bootstrap_samples_used": 4975
+    },
+    "S3.1_conceptual_understanding": {
+      "point_estimate": 0.8454027929649519,
+      "asymptotic_p": 0.03400298509740058,
+      "bootstrap_ci95": [
+        0.31782086308186414,
+        1.0
+      ],
+      "n_bootstrap_samples_used": 4901
+    },
+    "S2.3_problem_solving_agency_monotonicity": {
+      "point_estimate": -1.0,
+      "asymptotic_p": 0.0,
+      "note": "n=11 deterministic gradient points, not a small-N human-judgment check like the other three"
+    }
+  },
+  "multiple_comparisons_correction": {
+    "S1.1_help_seeking_calibration": {
+      "raw_p": 0.005429603759903328,
+      "holm_adjusted_p": 0.016288811279709985,
+      "holm_reject_at_05": true,
+      "bh_adjusted_p": 0.010859207519806655,
+      "bh_reject_at_05": true
+    },
+    "S1.2_student_grounding": {
+      "raw_p": 0.008528352374862226,
+      "holm_adjusted_p": 0.01705670474972445,
+      "holm_reject_at_05": true,
+      "bh_adjusted_p": 0.011371136499816302,
+      "bh_reject_at_05": true
+    },
+    "S3.1_conceptual_understanding": {
+      "raw_p": 0.03400298509740058,
+      "holm_adjusted_p": 0.03400298509740058,
+      "holm_reject_at_05": true,
+      "bh_adjusted_p": 0.03400298509740058,
+      "bh_reject_at_05": true
+    },
+    "S2.3_problem_solving_agency_monotonicity": {
+      "raw_p": 0.0,
+      "holm_adjusted_p": 0.0,
+      "holm_reject_at_05": true,
+      "bh_adjusted_p": 0.0,
+      "bh_reject_at_05": true
+    }
+  },
+  "s1_1_vs_s1_2_discriminant_check": {
+    "pearson_r": 0.9742465406712822,
+    "pearson_p": 4.188131178032614e-05,
+    "spearman_r": 0.9931270663228413,
+    "spearman_p": 8.074676154349294e-07,
+    "n": 8,
+    "interpretation": "high (>0.9) suggests the two rubric items may not be discriminating well from each other in the model's output; moderate suggests related-but-distinct scoring, consistent with the framework treating them as separate signals"
+  },
+  "gating_logic_confusion_matrix": {
+    "true_positive": 78,
+    "false_negative": 0,
+    "true_negative": 10,
+    "false_positive": 0,
+    "sensitivity_recall": 1.0,
+    "specificity": 1.0,
+    "precision": 1.0,
+    "false_negative_cases": [],
+    "false_positive_cases": []
+  },
+  "cfa_reliability_pipeline_smoke_test": {
+    "status": "ran_as_smoke_test_only",
+    "n_sessions": 4,
+    "non_null_counts_per_signal": {
+      "S1.1": 2,
+      "S1.2": 2,
+      "S1.3": 2,
+      "S1.4": 2,
+      "S1.5": 0,
+      "S1.6": 1,
+      "S2.1": 4,
+      "S2.2": 2,
+      "S2.3": 2,
+      "S2.4": 0,
+      "S3.1": 4,
+      "S3.2": 4,
+      "S3.3": 1,
+      "S3.4": 1
+    },
+    "usable_signals_for_correlation": [
+      "S1.1",
+      "S1.2",
+      "S2.1",
+      "S2.3",
+      "S3.1"
+    ],
+    "interpretable": false,
+    "why_not_interpretable": "n=4 sessions from a single synthetic AI persona is far below the sample size needed to estimate a 3-factor covariance structure (the paper's own a priori power analysis specifies ~300 real learners for even a modest effect size) - this run exists only to confirm the analysis code executes against real, correctly-shaped signal output.",
+    "correlation_matrix_signals_with_variation": {
+      "S1.1": {
+        "S1.1": 1.0,
+        "S1.2": 1.0,
+        "S2.1": 1.0,
+        "S2.3": 1.0,
+        "S3.1": 1.0
+      },
+      "S1.2": {
+        "S1.1": 1.0,
+        "S1.2": 1.0,
+        "S2.1": 1.0,
+        "S2.3": 1.0,
+        "S3.1": 1.0
+      },
+      "S2.1": {
+        "S1.1": 1.0,
+        "S1.2": 1.0,
+        "S2.1": 1.0,
+        "S2.3": 1.0,
+        "S3.1": 0.816
+      },
+      "S2.3": {
+        "S1.1": 1.0,
+        "S1.2": 1.0,
+        "S2.1": 1.0,
+        "S2.3": 1.0,
+        "S3.1": 1.0
+      },
+      "S3.1": {
+        "S1.1": 1.0,
+        "S1.2": 1.0,
+        "S2.1": 0.816,
+        "S2.3": 1.0,
+        "S3.1": 1.0
+      }
+    },
+    "cfa_attempt": {
+      "status": "fit_completed_but_not_interpretable",
+      "model_spec": "P1 =~ S1.1 + S1.2\nP2 =~ S2.1 + S2.3",
+      "note": "Convergence with n=4 does not imply a valid model - see why_not_interpretable above."
+    }
+  }
+}

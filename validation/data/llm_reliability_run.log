@@ -1,0 +1,122 @@
+Using live provider: ollama / qwen3:8b
+[1/8] explicit_solution_request_no_attempt repeat 1/5
+[1/8] explicit_solution_request_no_attempt repeat 2/5
+[1/8] explicit_solution_request_no_attempt repeat 3/5
+[1/8] explicit_solution_request_no_attempt repeat 4/5
+[1/8] explicit_solution_request_no_attempt repeat 5/5
+[2/8] bare_vague_request repeat 1/5
+[2/8] bare_vague_request repeat 2/5
+[2/8] bare_vague_request repeat 3/5
+[2/8] bare_vague_request repeat 4/5
+[2/8] bare_vague_request repeat 5/5
+[3/8] preliminary_concept_question repeat 1/5
+[3/8] preliminary_concept_question repeat 2/5
+[3/8] preliminary_concept_question repeat 3/5
+[3/8] preliminary_concept_question repeat 4/5
+[3/8] preliminary_concept_question repeat 5/5
+[4/8] reasoning_check_no_code repeat 1/5
+[4/8] reasoning_check_no_code repeat 2/5
+[4/8] reasoning_check_no_code repeat 3/5
+[4/8] reasoning_check_no_code repeat 4/5
+[4/8] reasoning_check_no_code repeat 5/5
+[5/8] specific_bug_with_code repeat 1/5
+[5/8] specific_bug_with_code repeat 2/5
+[5/8] specific_bug_with_code repeat 3/5
+[5/8] specific_bug_with_code repeat 4/5
+[5/8] specific_bug_with_code repeat 5/5
+[6/8] error_traceback_with_stderr repeat 1/5
+[6/8] error_traceback_with_stderr repeat 2/5
+[6/8] error_traceback_with_stderr repeat 3/5
+[6/8] error_traceback_with_stderr repeat 4/5
+[6/8] error_traceback_with_stderr repeat 5/5
+[7/8] premature_full_solution_with_no_code_shown repeat 1/5
+[7/8] premature_full_solution_with_no_code_shown repeat 2/5
+[7/8] premature_full_solution_with_no_code_shown repeat 3/5
+[7/8] premature_full_solution_with_no_code_shown repeat 4/5
+[7/8] premature_full_solution_with_no_code_shown repeat 5/5
+[8/8] bare_greeting repeat 1/5
+[8/8] bare_greeting repeat 2/5
+[8/8] bare_greeting repeat 3/5
+[8/8] bare_greeting repeat 4/5
+[8/8] bare_greeting repeat 5/5
+[1/6] rigorous_explanation repeat 1/5
+[1/6] rigorous_explanation repeat 2/5
+[1/6] rigorous_explanation repeat 3/5
+[1/6] rigorous_explanation repeat 4/5
+[1/6] rigorous_explanation repeat 5/5
+[2/6] core_idea_less_rigorous repeat 1/5
+[2/6] core_idea_less_rigorous repeat 2/5
+[2/6] core_idea_less_rigorous repeat 3/5
+[2/6] core_idea_less_rigorous repeat 4/5
+[2/6] core_idea_less_rigorous repeat 5/5
+[3/6] surface_line_by_line_restatement repeat 1/5
+[3/6] surface_line_by_line_restatement repeat 2/5
+[3/6] surface_line_by_line_restatement repeat 3/5
+[3/6] surface_line_by_line_restatement repeat 4/5
+[3/6] surface_line_by_line_restatement repeat 5/5
+[4/6] vague_gesture_at_mechanism repeat 1/5
+[4/6] vague_gesture_at_mechanism repeat 2/5
+[4/6] vague_gesture_at_mechanism repeat 3/5
+[4/6] vague_gesture_at_mechanism repeat 4/5
+[4/6] vague_gesture_at_mechanism repeat 5/5
+[5/6] no_understanding_admitted repeat 1/5
+[5/6] no_understanding_admitted repeat 2/5
+[5/6] no_understanding_admitted repeat 3/5
+[5/6] no_understanding_admitted repeat 4/5
+[5/6] no_understanding_admitted repeat 5/5
+[6/6] confidently_wrong repeat 1/5
+[6/6] confidently_wrong repeat 2/5
+[6/6] confidently_wrong repeat 3/5
+[6/6] confidently_wrong repeat 4/5
+[6/6] confidently_wrong repeat 5/5
+{
+  "n_repeats_per_example": 5,
+  "model": "qwen3:8b",
+  "help_seeking_calibration": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.0,
+      "max_stdev_across_examples": 0.0,
+      "mean_range_across_examples": 0.0,
+      "max_range_across_examples": 0.0,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.8659771773941028,
+      "p_value": 0.005429603759903328
+    },
+    "total_parse_failures": 0,
+    "total_calls": 40
+  },
+  "student_grounding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.0,
+      "max_stdev_across_examples": 0.0,
+      "mean_range_across_examples": 0.0,
+      "max_range_across_examples": 0.0,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.8432740427115677,
+      "p_value": 0.008528352374862226
+    },
+    "total_parse_failures": 0,
+    "total_calls": 40
+  },
+  "conceptual_understanding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.0037037037037037056,
+      "max_stdev_across_examples": 0.022222222222222233,
+      "mean_range_across_examples": 0.009259259259259264,
+      "max_range_across_examples": 0.05555555555555558,
+      "n_examples_with_repeats": 6
+    },
+    "face_validity": {
+      "spearman_r": 0.8454027929649519,
+      "p_value": 0.03400298509740058
+    },
+    "total_parse_failures": 0,
+    "total_calls": 30
+  }
+}
+
+Wrote llm_help_seeking_raw.json, llm_concept_understanding_raw.json, llm_reliability_summary.json

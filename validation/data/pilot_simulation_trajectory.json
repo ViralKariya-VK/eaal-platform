@@ -1,0 +1,270 @@
+[
+  {
+    "label": "Session 1 (Day 0): over-reliant delegation",
+    "session_id": 1,
+    "pillar_means": {
+      "P1": 0.5,
+      "P2": 0.34972677595628415,
+      "P3": 0.5
+    },
+    "signals": {
+      "S1.1": {
+        "value": 0.0,
+        "reason": null
+      },
+      "S1.2": {
+        "value": 0.0,
+        "reason": null
+      },
+      "S1.3": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.4": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.5": {
+        "value": null,
+        "reason": "fewer than two AI interactions to compare"
+      },
+      "S1.6": {
+        "value": null,
+        "reason": "insufficient session history for a longitudinal comparison"
+      },
+      "S2.1": {
+        "value": 0.0,
+        "reason": null
+      },
+      "S2.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S2.3": {
+        "value": 0.049180327868852514,
+        "reason": null
+      },
+      "S2.4": {
+        "value": null,
+        "reason": "no execution errors encountered"
+      },
+      "S3.1": {
+        "value": 0.0,
+        "reason": null
+      },
+      "S3.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.3": {
+        "value": null,
+        "reason": "this session is not a Knowledge Transfer assessment for any Lab"
+      },
+      "S3.4": {
+        "value": null,
+        "reason": "this session is not a Retention & Independent Recall assessment for any Lab"
+      }
+    }
+  },
+  {
+    "label": "Session 2 (Day 3): developing calibration",
+    "session_id": 2,
+    "pillar_means": {
+      "P1": 0.9,
+      "P2": 0.8055555555555555,
+      "P3": 1.0
+    },
+    "signals": {
+      "S1.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.3": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.4": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S1.5": {
+        "value": null,
+        "reason": "fewer than two AI interactions to compare"
+      },
+      "S1.6": {
+        "value": 0.5,
+        "reason": null
+      },
+      "S2.1": {
+        "value": 0.41666666666666663,
+        "reason": null
+      },
+      "S2.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S2.3": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S2.4": {
+        "value": null,
+        "reason": "no execution errors encountered"
+      },
+      "S3.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.3": {
+        "value": null,
+        "reason": "this session is not a Knowledge Transfer assessment for any Lab"
+      },
+      "S3.4": {
+        "value": null,
+        "reason": "this session is not a Retention & Independent Recall assessment for any Lab"
+      }
+    }
+  },
+  {
+    "label": "Session 3 (Day 7): transfer task, mostly independent",
+    "session_id": 3,
+    "pillar_means": {
+      "P1": null,
+      "P2": 1.0,
+      "P3": 1.0
+    },
+    "signals": {
+      "S1.1": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.2": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.3": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.4": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.5": {
+        "value": null,
+        "reason": "fewer than two AI interactions to compare"
+      },
+      "S1.6": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S2.2": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.3": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.4": {
+        "value": null,
+        "reason": "no execution errors encountered"
+      },
+      "S3.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.3": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.4": {
+        "value": null,
+        "reason": "this session is not a Retention & Independent Recall assessment for any Lab"
+      }
+    }
+  },
+  {
+    "label": "Session 4 (Day 35): retention check, unaided",
+    "session_id": 4,
+    "pillar_means": {
+      "P1": null,
+      "P2": 1.0,
+      "P3": 1.0
+    },
+    "signals": {
+      "S1.1": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.2": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.3": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.4": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S1.5": {
+        "value": null,
+        "reason": "fewer than two AI interactions to compare"
+      },
+      "S1.6": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S2.2": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.3": {
+        "value": null,
+        "reason": "no AI interactions in this session"
+      },
+      "S2.4": {
+        "value": null,
+        "reason": "no execution errors encountered"
+      },
+      "S3.1": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.2": {
+        "value": 1.0,
+        "reason": null
+      },
+      "S3.3": {
+        "value": null,
+        "reason": "this session is not a Knowledge Transfer assessment for any Lab"
+      },
+      "S3.4": {
+        "value": 1.0,
+        "reason": null
+      }
+    }
+  }
+]

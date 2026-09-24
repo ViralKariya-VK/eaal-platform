@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eaal-platform"
+version = "0.1.0"
+description = "Desktop platform for measuring Effective AI-Assisted Learning (EAAL) in coding education."
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "pywebview>=5.3,<7.0",
+    "SQLAlchemy>=2.0,<3.0",
+    "httpx>=0.27,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "radon>=6.0",
+    "pre-commit>=3.8",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
+    "mutmut>=3.2",
+]
+# Not imported by the app itself — `sandbox/executor.py` runs student code
+# with `sys.executable`, i.e. this same environment, so whatever labs expect
+# students to `import` (pandas/numpy for data-analysis tasks, matplotlib for
+# plotting) has to be installed here too. Keeping them as an extra rather
+# than a core dependency keeps that distinction explicit: these are for
+# code the *student* writes, not for CAVY's own source.
+sandbox-libs = [
+    "numpy>=1.26,<3.0",
+    "pandas>=2.2,<3.0",
+    "matplotlib>=3.8,<4.0",
+]
+# The web pilot survey (pilot_web/) — a separate, thin HTTP wrapper around
+# the same CavyApi/signals engine the desktop app uses, for collecting real
+# (if small-n) human-learner data via a shareable link instead of a
+# packaged desktop install. Not needed to run CAVY itself.
+pilot = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn>=0.30,<1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "N", "RUF"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# These two files' "lines" are mostly prose (a rendered report template,
+# hand-written rubric-validation rationale) rather than code logic, so a
+# 100-column code limit doesn't serve its usual purpose here.
+"validation/generate_report.py" = ["E501", "RUF001"]
+"validation/labeled_examples.py" = ["E501"]
+"validation/pilot_simulation.py" = ["E501"]
+"validation/advanced_statistics.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["eaal_platform"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["eaal_platform"]
+mypy_path = "src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+strict = false
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# pyobjc's macOS-only frameworks ship no py.typed marker or stubs.
+module = ["AppKit", "Foundation"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=eaal_platform --cov-report=term-missing --cov-fail-under=70"
+markers = [
+    "slow: exercises real timeouts/subprocess limits; skipped from pre-commit's fast hook",
+]
+
+[tool.coverage.run]
+source = ["src/eaal_platform"]
+branch = true
+
+[tool.radon]
+exclude = "tests/*,scripts/*"
+
+[tool.mutmut]
+# source_paths must be the WHOLE package (not just the file we care
+# about) so mutmut's sandbox copy is import-complete -- conftest.py
+# imports eaal_platform.db.engine, which must exist alongside the
+# mutated file or every test errors on collection. only_mutate is what
+# actually scopes which file gets mutants generated, keeping the run
+# fast while the rest of the package is just copied verbatim.
+source_paths = ["src/eaal_platform"]
+only_mutate = ["src/eaal_platform/signals/compute.py"]
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = ["--override-ini=addopts="]

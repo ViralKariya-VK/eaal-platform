@@ -1,0 +1,178 @@
+[
+  {
+    "label": "explicit_solution_request_no_attempt",
+    "message": "Please just write the whole reverseList function for me, I don't want to think about it.",
+    "expected_calibration_rank": 1,
+    "expected_grounding_rank": 1,
+    "rationale": "Rubric explicitly calls this out as a 0: complete-solution request, no attempt.",
+    "calibration_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "grounding_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "bare_vague_request",
+    "message": "why is my loop wrong",
+    "expected_calibration_rank": 2,
+    "expected_grounding_rank": 2,
+    "rationale": "A real question, but no code, no specifics, no description of the actual behavior.",
+    "calibration_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "grounding_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "preliminary_concept_question",
+    "message": "Before I start, what's the general idea behind reversing a linked list in place?",
+    "expected_calibration_rank": 3,
+    "expected_grounding_rank": 3,
+    "rationale": "Reasonable preliminary question (not a solution request) but still no own attempt to ground it in.",
+    "calibration_scores": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "grounding_scores": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "reasoning_check_no_code",
+    "message": "I'm planning to use two pointers, prev and curr, to reverse the list in place. I think I might also need a third pointer to save curr.next before I overwrite it \u2014 does that reasoning sound right?",
+    "expected_calibration_rank": 6,
+    "expected_grounding_rank": 6,
+    "rationale": "Specific, well-timed check of the student's own reasoning before writing code.",
+    "calibration_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "grounding_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "specific_bug_with_code",
+    "message": "My reverse() function returns None instead of the reversed list. I think I'm not returning the new head at the end. Am I right?",
+    "expected_calibration_rank": 7,
+    "expected_grounding_rank": 7,
+    "rationale": "Specific, targeted, references their own real code and a concrete symptom.",
+    "calibration_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "grounding_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "error_traceback_with_stderr",
+    "message": "I'm getting this error when I run my code, what does it mean?",
+    "expected_calibration_rank": 8,
+    "expected_grounding_rank": 8,
+    "rationale": "Well-timed (right after hitting a real error) and grounded in the actual traceback.",
+    "calibration_scores": [
+      0.8,
+      0.8,
+      0.8,
+      0.8,
+      0.8
+    ],
+    "grounding_scores": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "premature_full_solution_with_no_code_shown",
+    "message": "Can you just give me the full working solution to this?",
+    "expected_calibration_rank": 1,
+    "expected_grounding_rank": 1,
+    "rationale": "Same construct as the first example, different phrasing \u2014 a second low-anchor point.",
+    "calibration_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "grounding_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "bare_greeting",
+    "message": "hi, can you help?",
+    "expected_calibration_rank": 2,
+    "expected_grounding_rank": 1,
+    "rationale": "Not yet a real request at all; essentially zero grounding.",
+    "calibration_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "grounding_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  }
+]

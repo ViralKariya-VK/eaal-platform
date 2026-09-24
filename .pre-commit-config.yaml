@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict)
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["src"]
+
+      - id: pytest-fast
+        name: pytest (fast subset, no coverage gate)
+        entry: pytest
+        language: system
+        pass_filenames: false
+        args: ["-x", "-q", "--no-cov", "-m", "not slow"]

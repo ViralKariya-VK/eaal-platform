@@ -1,0 +1,86 @@
+[
+  {
+    "label": "rigorous_explanation",
+    "response_text": "The list is reversed by walking through it once while keeping three pointers: the previous node, the current node, and the next node (saved before we overwrite the link). At each step we point curr.next backward to prev, then advance prev and curr forward. Because we only rewire existing pointers rather than allocate new nodes, this runs in O(n) time and O(1) extra space.",
+    "expected_rank": 6,
+    "rationale": "Explains the mechanism, why it works, and its complexity \u2014 full understanding.",
+    "scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "core_idea_less_rigorous",
+    "response_text": "We flip each node's pointer to point to the previous node instead of the next one, one at a time, until the whole list points backward.",
+    "expected_rank": 5,
+    "rationale": "Captures the real idea correctly, just less detailed than the rigorous version.",
+    "scores": [
+      0.5,
+      0.5,
+      0.5,
+      0.5555555555555556,
+      0.5
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "surface_line_by_line_restatement",
+    "response_text": "First I set prev to None. Then I loop while curr is not None. Inside the loop I save next as curr.next, then set curr.next to prev, then set prev to curr, then set curr to next. After the loop I return prev.",
+    "expected_rank": 3,
+    "rationale": "Rubric explicitly penalizes this: restates code line-by-line, never says why.",
+    "scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "vague_gesture_at_mechanism",
+    "response_text": "Because we use a while loop and some pointers to go through the list.",
+    "expected_rank": 2,
+    "rationale": "Gestures at the mechanism without ever explaining the actual reversal logic.",
+    "scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "no_understanding_admitted",
+    "response_text": "It just works, honestly I don't really know why, I copied it from the AI.",
+    "expected_rank": 1,
+    "rationale": "Explicitly no understanding \u2014 should be among the very lowest scores.",
+    "scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  },
+  {
+    "label": "confidently_wrong",
+    "response_text": "It works because Python automatically sorts the list for us when we call .reverse(), so the algorithm underneath doesn't really matter.",
+    "expected_rank": 1,
+    "rationale": "Factually wrong and irrelevant to the actual algorithm \u2014 a second low anchor.",
+    "scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "parse_failures": 0
+  }
+]
