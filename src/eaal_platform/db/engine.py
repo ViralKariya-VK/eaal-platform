@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from eaal_platform.db.models import Base
@@ -76,9 +76,28 @@ def create_db_engine(db_path: Path | None = None) -> Engine:
     return engine
 
 
+# Columns added after the first release. ``create_all`` only creates missing
+# *tables*, so a database file made by an older version needs these added in
+# place or the app would crash on first query. (table, column, SQL type)
+_ADDED_COLUMNS = (
+    ("tasks", "archived_at", "DATETIME"),
+    ("students", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
+)
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table, column, sql_type in _ADDED_COLUMNS:
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+
+
 def init_db(engine: Engine) -> None:
-    """Create all tables that don't already exist."""
+    """Create all tables that don't already exist, and upgrade older files."""
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

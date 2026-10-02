@@ -106,3 +106,54 @@ def test_provider_name_and_model_name() -> None:
     provider = OllamaProvider(model="qwen3:8b", client=client)
     assert provider.provider_name == "ollama"
     assert provider.model_name == "qwen3:8b"
+
+
+# -- diagnose(): says *what* is wrong, not just "unreachable" ---------------------------------
+
+
+def _tags(*names: str):  # type: ignore[no-untyped-def]
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"models": [{"name": n, "model": n} for n in names]})
+
+    return handler
+
+
+def test_diagnose_ready_when_the_model_is_installed() -> None:
+    provider = OllamaProvider(model="qwen3:8b", client=_client_with_handler(_tags("qwen3:8b")))
+    assert provider.diagnose() is None
+
+
+def test_diagnose_server_not_running() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    provider = OllamaProvider(client=_client_with_handler(handler))
+    assert provider.diagnose() == "Ollama isn't running on this computer."
+
+
+def test_diagnose_model_missing_says_how_to_install_it() -> None:
+    provider = OllamaProvider(model="qwen3:8b", client=_client_with_handler(_tags("llama3:8b")))
+
+    problem = provider.diagnose()
+
+    assert problem is not None
+    assert "qwen3:8b isn't installed" in problem
+    assert "ollama pull qwen3:8b" in problem
+
+
+def test_diagnose_server_up_but_no_models_at_all() -> None:
+    provider = OllamaProvider(client=_client_with_handler(_tags()))
+    assert "isn't installed" in (provider.diagnose() or "")
+
+
+def test_diagnose_treats_a_bare_model_name_as_latest() -> None:
+    provider = OllamaProvider(model="llama3", client=_client_with_handler(_tags("llama3:latest")))
+    assert provider.diagnose() is None
+
+
+def test_diagnose_survives_a_garbled_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="not json")
+
+    provider = OllamaProvider(client=_client_with_handler(handler))
+    assert provider.diagnose() == "Ollama isn't running on this computer."

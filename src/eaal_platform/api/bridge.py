@@ -28,13 +28,19 @@ normally give a per-request session/cookie.
 
 from __future__ import annotations
 
+import csv
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform.ai.groq_provider import GroqProvider
+from eaal_platform.ai.ollama_provider import OllamaProvider
 from eaal_platform.ai.provider import AIProvider, GenerationContext, Purpose, UnavailableProvider
+from eaal_platform.auth import password_problem
 from eaal_platform.db.bootstrap import (
     authenticate_professor,
     authenticate_student,
@@ -44,10 +50,22 @@ from eaal_platform.db.bootstrap import (
     start_stage_session,
 )
 from eaal_platform.db.bootstrap import (
+    change_password as change_password_row,
+)
+from eaal_platform.db.bootstrap import (
     create_followup_assessment as create_followup_assessment_row,
 )
 from eaal_platform.db.bootstrap import (
     create_lab as create_lab_row,
+)
+from eaal_platform.db.bootstrap import (
+    reset_student_password as reset_student_password_row,
+)
+from eaal_platform.db.bootstrap import (
+    set_lab_archived as set_lab_archived_row,
+)
+from eaal_platform.db.bootstrap import (
+    update_lab as update_lab_row,
 )
 from eaal_platform.db.models import (
     AIAssistanceMode,
@@ -58,6 +76,8 @@ from eaal_platform.db.models import (
     Event,
     EventType,
     ExecutionResult,
+    Professor,
+    SignalScore,
     Stage,
     StageType,
     Student,
@@ -66,10 +86,30 @@ from eaal_platform.db.models import (
 from eaal_platform.db.models import Session as SessionModel
 from eaal_platform.db.progress import is_stage_unlocked
 from eaal_platform.events.logger import EventLogger, PendingEvent
+from eaal_platform.progress_report import SessionRow, build_progress
 from eaal_platform.sandbox.executor import run_code as sandbox_run_code
 from eaal_platform.signals.compute import compute_all_signals, persist_signal_scores
 
 _ENTRY_FILENAME = "main.py"
+
+_STAGE_TYPES = (StageType.LEARNING, StageType.EXPLORATION, StageType.ASSESSMENT)
+
+
+def _is_lab(task: Task) -> bool:
+    """A Lab (as opposed to Practice, or a Transfer/Retention follow-up)."""
+    return bool(task.stages) and task.assessment_kind is None
+
+
+def _is_archived(task: Task) -> bool:
+    parent = task.linked_task
+    return task.archived_at is not None or (parent is not None and parent.archived_at is not None)
+
+
+def _csv_safe(value: object) -> str:
+    """Stop a spreadsheet treating a cell as a formula (e.g. a name like ``=HYPERLINK(...)``)."""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
 
 # S3.1 (Conceptual Understanding): a fixed prompt shown at Assessment-stage
 # submit time. Stored alongside each response (see ``ConceptCheckResponse``)
@@ -122,10 +162,15 @@ class CavyApi:
         session_factory: sessionmaker[OrmSession],
         event_logger: EventLogger,
         ai_provider: AIProvider | None = None,
+        save_file_dialog: Callable[[str], str | None] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._event_logger = event_logger
         self._ai_provider = ai_provider or UnavailableProvider()
+        # Opens the OS "Save as" dialog and returns the chosen path (None if
+        # cancelled). Injected by app.py because only the window can show it;
+        # the webview can't download files itself.
+        self._save_file_dialog = save_file_dialog
         self._current_student_id: int | None = None
         self._current_student_name: str | None = None
         self._current_professor_id: int | None = None
@@ -147,7 +192,12 @@ class CavyApi:
                 return {"ok": False, "error": "Incorrect email or password."}
             self._current_student_id, self._current_student_name = result
             self._current_professor_id, self._current_professor_name = None, None
-            return {"ok": True, "role": "student", "name": self._current_student_name}
+            return {
+                "ok": True,
+                "role": "student",
+                "name": self._current_student_name,
+                "must_change_password": self._student_must_change_password(),
+            }
         if role == "professor":
             result = authenticate_professor(self._session_factory, email=email, password=password)
             if result is None:
@@ -165,6 +215,9 @@ class CavyApi:
         password: str,
         enrollment_no: str | None = None,
     ) -> dict[str, Any]:
+        problem = password_problem(password)
+        if problem:
+            return {"ok": False, "error": problem}
         try:
             if role == "student":
                 create_student_account(
@@ -183,6 +236,89 @@ class CavyApi:
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
+
+    def _student_must_change_password(self) -> bool:
+        with self._session_factory() as db_session:
+            student = db_session.get(Student, self._require_student_id())
+            return bool(student and student.must_change_password)
+
+    def get_profile(self) -> dict[str, Any]:
+        """The signed-in user's own account details, for the Profile screen."""
+        with self._session_factory() as db_session:
+            if self._current_student_id is not None:
+                student = db_session.get(Student, self._current_student_id)
+                if student is not None:
+                    return {
+                        "role": "student",
+                        "name": student.display_name,
+                        "email": student.email,
+                        "enrollment_no": student.enrollment_no,
+                        "must_change_password": student.must_change_password,
+                    }
+            if self._current_professor_id is not None:
+                professor = db_session.get(Professor, self._current_professor_id)
+                if professor is not None:
+                    return {
+                        "role": "professor",
+                        "name": professor.display_name,
+                        "email": professor.email,
+                        "enrollment_no": None,
+                        "must_change_password": False,
+                    }
+        raise ValueError("Not logged in")
+
+    def change_password(self, current_password: str, new_password: str) -> dict[str, Any]:
+        if self._current_student_id is not None:
+            role, user_id = "student", self._current_student_id
+        elif self._current_professor_id is not None:
+            role, user_id = "professor", self._current_professor_id
+        else:
+            raise ValueError("Not logged in")
+        try:
+            change_password_row(
+                self._session_factory,
+                role=role,
+                user_id=user_id,
+                current_password=current_password,
+                new_password=new_password,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def get_students(self) -> list[dict[str, Any]]:
+        """Students with an account on this device (professor roster / reset list)."""
+        self._require_professor_id()
+        with self._session_factory() as db_session:
+            students = (
+                db_session.query(Student)
+                .filter(Student.email.is_not(None))
+                .order_by(Student.display_name)
+                .all()
+            )
+            return [
+                {
+                    "id": student.id,
+                    "name": student.display_name,
+                    "email": student.email,
+                    "enrollment_no": student.enrollment_no,
+                    "must_change_password": student.must_change_password,
+                }
+                for student in students
+            ]
+
+    def reset_student_password(self, student_id: int) -> dict[str, Any]:
+        """Set a temporary password for a student who is locked out.
+
+        Returned once, in the clear, so the professor can pass it on; the
+        student is made to replace it at next sign-in.
+        """
+        self._require_professor_id()
+        try:
+            temporary = reset_student_password_row(self._session_factory, student_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "temporary_password": temporary}
 
     def logout(self) -> None:
         self._current_student_id, self._current_student_name = None, None
@@ -209,7 +345,11 @@ class CavyApi:
 
     def get_labs(self) -> list[dict[str, Any]]:
         with self._session_factory() as db_session:
-            tasks = [task for task in db_session.query(Task).all() if task.stages]
+            tasks = [
+                task
+                for task in db_session.query(Task).all()
+                if _is_lab(task) and not _is_archived(task)
+            ]
             return [
                 {
                     "id": task.id,
@@ -304,7 +444,7 @@ class CavyApi:
         """
         self._require_professor_id()
         stage_inputs = lab.get("stages") or []
-        stage_types = (StageType.LEARNING, StageType.EXPLORATION, StageType.ASSESSMENT)
+        stage_types = _STAGE_TYPES
         if len(stage_inputs) != len(stage_types):
             raise ValueError(f"Expected {len(stage_types)} stage configs, got {len(stage_inputs)}")
 
@@ -330,10 +470,109 @@ class CavyApi:
         )
         return {"task_id": task_id}
 
-    def get_professor_labs(self) -> list[dict[str, Any]]:
+    def get_lab(self, task_id: int) -> dict[str, Any]:
+        """Everything the Edit form needs, in ``create_lab``'s payload shape."""
         self._require_professor_id()
         with self._session_factory() as db_session:
-            tasks = [task for task in db_session.query(Task).all() if task.stages]
+            task = db_session.get(Task, task_id)
+            if task is None or not _is_lab(task):
+                raise ValueError(f"No lab with id {task_id}")
+            started_stage_ids = {
+                stage_id
+                for (stage_id,) in db_session.query(SessionModel.stage_id)
+                .filter(SessionModel.stage_id.in_([stage.id for stage in task.stages]))
+                .distinct()
+            }
+            return {
+                "id": task.id,
+                "title": task.title,
+                "course": task.course,
+                "division": task.division,
+                "batch": task.batch,
+                "topic": task.learning_objective,
+                "description": task.description,
+                "difficulty": task.difficulty,
+                "archived": _is_archived(task),
+                "stages": [
+                    {
+                        "stage_type": stage.stage_type.value,
+                        "duration_minutes": stage.duration_minutes,
+                        "ai_assistance_mode": stage.ai_assistance_mode.value,
+                        "mode_locked": stage.id in started_stage_ids,
+                    }
+                    for stage in task.stages
+                ],
+            }
+
+    def update_lab(self, task_id: int, lab: dict[str, Any]) -> dict[str, Any]:
+        """Save an edited lab. ``lab`` has the same keys as ``create_lab``'s payload."""
+        self._require_professor_id()
+        title = (lab.get("title") or "").strip()
+        if not title:
+            return {"ok": False, "error": "Session Title is required."}
+        try:
+            update_lab_row(
+                self._session_factory,
+                task_id,
+                title=title,
+                description=lab.get("description"),
+                learning_objective=lab.get("topic"),
+                difficulty=lab.get("difficulty"),
+                course=lab.get("course"),
+                division=lab.get("division"),
+                batch=lab.get("batch"),
+                stage_plan=tuple(
+                    (AIAssistanceMode(stage["ai_assistance_mode"]), stage.get("duration_minutes"))
+                    for stage in lab.get("stages") or []
+                ),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def archive_lab(self, task_id: int) -> dict[str, Any]:
+        self._require_professor_id()
+        set_lab_archived_row(self._session_factory, task_id, archived=True)
+        return {"ok": True}
+
+    def unarchive_lab(self, task_id: int) -> dict[str, Any]:
+        self._require_professor_id()
+        set_lab_archived_row(self._session_factory, task_id, archived=False)
+        return {"ok": True}
+
+    def export_lab_report(self, task_id: int) -> dict[str, Any]:
+        """Write a lab's report as a CSV file the professor picks a location for."""
+        self._require_professor_id()
+        report = self.get_lab_report(task_id)
+        if self._save_file_dialog is None:
+            return {"ok": False, "error": "Saving files isn't available in this window."}
+        safe_title = "".join(c if c.isalnum() or c in "-." else "_" for c in report["task_title"])
+        chosen = self._save_file_dialog(f"{safe_title}_report.csv")
+        if not chosen:
+            return {"ok": False, "cancelled": True}
+        with Path(chosen).open("w", newline="", encoding="utf-8-sig") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["Student Name", "Enrolment No.", "Score", "Submitted On", "Status"])
+            for row in report["rows"]:
+                writer.writerow(
+                    [
+                        _csv_safe(row["student_name"]),
+                        _csv_safe(row["enrollment_no"]),
+                        _csv_safe(row["score"]),
+                        _csv_safe(row["submitted_at"]),
+                        _csv_safe(row["status"]),
+                    ]
+                )
+        return {"ok": True, "path": chosen}
+
+    def get_professor_labs(self, include_archived: bool = False) -> list[dict[str, Any]]:
+        self._require_professor_id()
+        with self._session_factory() as db_session:
+            tasks = [
+                task
+                for task in db_session.query(Task).all()
+                if _is_lab(task) and (include_archived or not _is_archived(task))
+            ]
             return [
                 {
                     "id": task.id,
@@ -341,6 +580,7 @@ class CavyApi:
                     "course": task.course,
                     "division": task.division,
                     "batch": task.batch,
+                    "archived": _is_archived(task),
                 }
                 for task in tasks
             ]
@@ -385,7 +625,11 @@ class CavyApi:
         """
         self._require_professor_id()
         with self._session_factory() as db_session:
-            tasks = [task for task in db_session.query(Task).all() if task.stages]
+            tasks = [
+                task
+                for task in db_session.query(Task).all()
+                if _is_lab(task) and not _is_archived(task)
+            ]
 
             student_ids: set[int] = set()
             all_graded_scores: list[float] = []
@@ -511,6 +755,10 @@ class CavyApi:
             }
 
     def start_stage(self, stage_id: int) -> dict[str, Any]:
+        with self._session_factory() as db_session:
+            target = db_session.get(Stage, stage_id)
+            if target is not None and _is_archived(target.task):
+                raise ValueError("This lab has been archived by your professor.")
         session_id = start_stage_session(
             self._session_factory, self._require_student_id(), stage_id
         )
@@ -650,7 +898,40 @@ class CavyApi:
     # -- AI chat --------------------------------------------------------
 
     def ping_ai(self) -> bool:
-        return self._ai_provider.ping()
+        return self._ai_provider.diagnose() is None
+
+    def get_ai_settings(self) -> dict[str, Any]:
+        problem = self._ai_provider.diagnose()
+        return {
+            "provider": self._ai_provider.provider_name,
+            "model": self._ai_provider.model_name,
+            "available": problem is None,
+            "problem": problem,
+        }
+
+    def set_ai_provider(self, provider: str, api_key: str = "") -> dict[str, Any]:
+        """Switch the assistant's backend for the rest of this app session.
+
+        A Groq key is accepted only if Groq answers with it, and is held in
+        memory only, never written to the database or disk.
+        """
+        candidate: AIProvider
+        if provider == "ollama":
+            candidate = OllamaProvider()
+        elif provider == "groq":
+            key = api_key.strip()
+            if not key:
+                return {"ok": False, "error": "Enter a Groq API key."}
+            candidate = GroqProvider(api_key=key)
+            if not candidate.ping():
+                return {
+                    "ok": False,
+                    "error": "Couldn't reach Groq with that key. Check it and try again.",
+                }
+        else:
+            raise ValueError(f"Unknown AI provider {provider!r}")
+        self._ai_provider = candidate
+        return {"ok": True, **self.get_ai_settings()}
 
     def send_ai_message(
         self, session_id: int, message: str, files: dict[str, str]
@@ -787,6 +1068,71 @@ class CavyApi:
                 for heading, question, keys in _PILLARS
             ],
         }
+
+    def get_my_progress(self) -> dict[str, Any]:
+        """The signed-in student's learning over all their submitted sessions.
+
+        Sessions that were never scored (e.g. submitted before the student
+        opened the CIQ screen) are scored now and saved, so the first call
+        can be slow and later calls are quick.
+        """
+        student_id = self._require_student_id()
+        with self._session_factory() as db_session:
+            session_ids = [
+                row.id
+                for row in db_session.query(SessionModel)
+                .filter(
+                    SessionModel.student_id == student_id,
+                    SessionModel.submitted_at.is_not(None),
+                )
+                .all()
+            ]
+            scored_ids = {
+                sid
+                for (sid,) in db_session.query(SignalScore.session_id)
+                .filter(SignalScore.session_id.in_(session_ids))
+                .distinct()
+                .all()
+            }
+        for session_id in session_ids:
+            if session_id not in scored_ids:
+                results = compute_all_signals(self._session_factory, session_id, self._ai_provider)
+                persist_signal_scores(self._session_factory, session_id, results)
+
+        rows: list[SessionRow] = []
+        with self._session_factory() as db_session:
+            for session in db_session.query(SessionModel).filter(SessionModel.id.in_(session_ids)):
+                latest: dict[str, float | None] = {}
+                for score in (
+                    db_session.query(SignalScore)
+                    .filter_by(session_id=session.id)
+                    .order_by(SignalScore.id)
+                ):
+                    latest[score.signal_key] = score.value  # later rows win
+                task = session.task
+                if task.assessment_kind is not None:
+                    kind = "followup"
+                elif _is_lab(task):
+                    kind = "lab"
+                else:
+                    kind = "practice"
+                submitted = session.submitted_at
+                assert submitted is not None
+                # SQLite hands back naive datetimes; compare like with like.
+                elapsed = submitted.replace(tzinfo=None) - session.started_at.replace(tzinfo=None)
+                rows.append(
+                    {
+                        "session_id": session.id,
+                        "title": task.title,
+                        "kind": kind,
+                        "stage": session.stage.stage_type.value if session.stage else None,
+                        "submitted_at": submitted.isoformat(),
+                        "minutes": max(0, round(elapsed.total_seconds() / 60)),
+                        "ai_interactions": len(session.ai_interactions),
+                        "signals": latest,
+                    }
+                )
+        return build_progress(rows)
 
     # -- persistence helpers ----------------------------------------------
 

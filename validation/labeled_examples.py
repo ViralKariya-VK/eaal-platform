@@ -230,3 +230,217 @@ CONCEPT_UNDERSTANDING_EXAMPLES: list[ConceptExample] = [
         rationale="Factually wrong and irrelevant to the actual algorithm — a second low anchor.",
     ),
 ]
+
+
+# Written BEFORE the S3.1 rubric was revised, on tasks the rubric text was never
+# tuned against, so they can show whether a prompt change generalises rather
+# than just fixing the six examples above. Same single-rater caveat applies:
+# these labels are one researcher's judgement, not an independent gold standard.
+_PALINDROME_TASK = (
+    "Write a function that returns True if a string reads the same forwards and backwards."
+)
+_BINARY_SEARCH_TASK = (
+    "Implement binary search: return the index of a target in a sorted list, or -1."
+)
+
+CONCEPT_UNDERSTANDING_HELDOUT_EXAMPLES: list[ConceptExample] = [
+    ConceptExample(
+        label="palindrome_rigorous",
+        task_description=_PALINDROME_TASK,
+        response_text=(
+            "A string is a palindrome exactly when its first half mirrors its second half, so I "
+            "only need to compare the character at position i with the one at position n-1-i. If "
+            "any pair differs it can't be a palindrome, and if I get to the middle with no "
+            "mismatch every pair matched. That needs just one pass, O(n), with two indices."
+        ),
+        expected_rank=7,
+        expected_value=0.95,
+        rationale="States the mirror property, why a mismatch decides it, and the cost.",
+    ),
+    ConceptExample(
+        label="binary_search_rigorous",
+        task_description=_BINARY_SEARCH_TASK,
+        response_text=(
+            "Because the list is sorted, comparing the target with the middle element tells me "
+            "which half it must be in, so I can throw the other half away. Each step halves the "
+            "search range, so it takes about log2(n) steps instead of n. The loop keeps the "
+            "invariant that if the target exists it lies between low and high."
+        ),
+        expected_rank=7,
+        expected_value=0.95,
+        rationale="Explains why halving is valid (sortedness), the invariant, and the cost.",
+    ),
+    ConceptExample(
+        label="binary_search_terse_but_correct",
+        task_description=_BINARY_SEARCH_TASK,
+        response_text="The list is sorted, so I check the middle and discard the half that can't contain the target.",
+        expected_rank=5,
+        expected_value=0.7,
+        rationale="Short, but it gives the actual reason the approach works. Must not be over-penalised.",
+    ),
+    ConceptExample(
+        label="palindrome_core_idea",
+        task_description=_PALINDROME_TASK,
+        response_text="You compare the string with itself reversed, and if they're the same it's a palindrome.",
+        expected_rank=5,
+        expected_value=0.7,
+        rationale="Correct core idea in one sentence, no depth. Mid-high.",
+    ),
+    ConceptExample(
+        label="palindrome_surface_restatement",
+        task_description=_PALINDROME_TASK,
+        response_text=(
+            "I define a function that takes s. Then I make a variable left equal to 0 and right "
+            "equal to len(s) minus 1. Then I start a while loop that runs while left is less than "
+            "right. Inside it I check if s[left] is not equal to s[right] and if so I return "
+            "False. Otherwise I add 1 to left and subtract 1 from right. At the end I return True."
+        ),
+        expected_rank=3,
+        expected_value=0.2,
+        rationale="Pure line-by-line narration of the code; never says why checking pairs works.",
+    ),
+    ConceptExample(
+        label="binary_search_surface_long",
+        task_description=_BINARY_SEARCH_TASK,
+        response_text=(
+            "First I set low to 0 and high to the last index. While low is at most high I compute "
+            "mid as the average of low and high using integer division. If arr[mid] equals the "
+            "target I return mid. If arr[mid] is less than the target I set low to mid plus 1, "
+            "and otherwise I set high to mid minus 1. When the loop ends without finding it I "
+            "return -1."
+        ),
+        expected_rank=3,
+        expected_value=0.25,
+        rationale="Long and precise-sounding but purely procedural: describes WHAT, never WHY.",
+    ),
+    ConceptExample(
+        label="palindrome_vague",
+        task_description=_PALINDROME_TASK,
+        response_text="It looks through the string and checks it with some conditions to see if it's the same.",
+        expected_rank=2,
+        expected_value=0.1,
+        rationale="Gestures at checking without saying what is compared or why.",
+    ),
+    ConceptExample(
+        label="binary_search_no_understanding",
+        task_description=_BINARY_SEARCH_TASK,
+        response_text="I got the code from the AI and it passes the tests. I'm not sure how it finds the number.",
+        expected_rank=1,
+        expected_value=0.05,
+        rationale="Admits no understanding.",
+    ),
+    ConceptExample(
+        label="palindrome_confidently_wrong",
+        task_description=_PALINDROME_TASK,
+        response_text=(
+            "It works because a palindrome is a string where all the characters are the same, so "
+            "I just check that every letter equals the first letter."
+        ),
+        expected_rank=1,
+        expected_value=0.0,
+        rationale="States a wrong definition of palindrome (AAAA only) with confidence.",
+    ),
+]
+
+
+# Third set, written after the held-out set above had already been looked at
+# while revising the S3.1 rubric (so the held-out set is no longer a clean
+# test). These were written before the final prompt was run on them and are
+# scored exactly once, at the end.
+_FACTORIAL_TASK = "Write a recursive function that returns n factorial."
+_PRIME_TASK = "Write a function that returns True if a number is prime."
+_MERGE_TASK = "Merge two sorted lists into one sorted list."
+
+CONCEPT_UNDERSTANDING_FRESH_EXAMPLES: list[ConceptExample] = [
+    ConceptExample(
+        label="factorial_rigorous",
+        task_description=_FACTORIAL_TASK,
+        response_text=(
+            "n factorial is n times the factorial of n-1, so each call hands a slightly smaller "
+            "version of the same problem to the next call. The base case, n equal to 0 returning "
+            "1, is what stops the chain, and as the calls return each one multiplies the result "
+            "it was waiting for by its own n, which builds up the product."
+        ),
+        expected_rank=7,
+        expected_value=0.95,
+        rationale="Self-similarity, the role of the base case, and how the result is assembled.",
+    ),
+    ConceptExample(
+        label="prime_rigorous",
+        task_description=_PRIME_TASK,
+        response_text=(
+            "If n has a divisor then it has one that is at most its square root, because divisors "
+            "come in pairs that multiply to n and one of each pair can't exceed the square root. "
+            "So I only need to test up to the square root, which is O(sqrt n) instead of O(n)."
+        ),
+        expected_rank=7,
+        expected_value=0.95,
+        rationale="Gives the pairing argument that justifies stopping at sqrt(n), and the cost.",
+    ),
+    ConceptExample(
+        label="merge_terse_correct",
+        task_description=_MERGE_TASK,
+        response_text="Both lists are sorted, so the smallest remaining item is always at the front of one of them; I keep taking the smaller front item.",
+        expected_rank=5,
+        expected_value=0.75,
+        rationale="Short but states exactly the property that makes the merge correct.",
+    ),
+    ConceptExample(
+        label="prime_core_idea",
+        task_description=_PRIME_TASK,
+        response_text="A prime has no divisors besides 1 and itself, so I try dividing by smaller numbers and see if any of them divide evenly.",
+        expected_rank=5,
+        expected_value=0.65,
+        rationale="Correct definition-level idea; no insight into why the search can stop early.",
+    ),
+    ConceptExample(
+        label="factorial_surface",
+        task_description=_FACTORIAL_TASK,
+        response_text=(
+            "I define factorial with a parameter n. If n equals 0 I return 1. Otherwise I return "
+            "n multiplied by factorial of n minus 1. Then I call factorial on 5 and print the result."
+        ),
+        expected_rank=3,
+        expected_value=0.25,
+        rationale="Narrates the code; never says why recursion produces the factorial.",
+    ),
+    ConceptExample(
+        label="prime_surface_with_sqrt",
+        task_description=_PRIME_TASK,
+        response_text=(
+            "I check if n is less than 2 and return False. Then I loop i from 2 up to the integer "
+            "square root of n plus 1. For each i, if n modulo i equals 0 I return False. If the "
+            "loop finishes I return True."
+        ),
+        expected_rank=3,
+        expected_value=0.25,
+        rationale="Mentions the square root but only as a step; the reason it's enough is never given.",
+    ),
+    ConceptExample(
+        label="merge_vague",
+        task_description=_MERGE_TASK,
+        response_text="It goes through both lists and puts things in the right order somehow.",
+        expected_rank=2,
+        expected_value=0.1,
+        rationale="No mechanism at all.",
+    ),
+    ConceptExample(
+        label="factorial_no_understanding",
+        task_description=_FACTORIAL_TASK,
+        response_text="Honestly I just asked the AI and pasted it. Recursion confuses me.",
+        expected_rank=1,
+        expected_value=0.05,
+        rationale="Admits no understanding.",
+    ),
+    ConceptExample(
+        label="merge_confidently_wrong",
+        task_description=_MERGE_TASK,
+        response_text=(
+            "It works because I concatenate the two lists, and Python lists are always kept "
+            "sorted automatically, so no comparing is needed."
+        ),
+        expected_rank=1,
+        expected_value=0.0,
+        rationale="Confident and factually wrong.",
+    ),
+]

@@ -14,9 +14,25 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import secrets
 
 _ITERATIONS = 200_000
 _ALGORITHM = "sha256"
+
+MIN_PASSWORD_LENGTH = 8
+# No 0/O/1/l/I: a temporary password gets read aloud or copied by hand.
+_TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def password_problem(password: str) -> str | None:
+    """Why ``password`` isn't acceptable, or ``None`` if it is."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    return None
+
+
+def generate_temporary_password(length: int = 10) -> str:
+    return "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(length))
 
 
 def hash_password(password: str) -> str:

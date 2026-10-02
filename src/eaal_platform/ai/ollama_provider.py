@@ -39,6 +39,11 @@ _PING_TIMEOUT_SECONDS = 2.0
 _RUBRIC_SCORING_TEMPERATURE = 0.1
 
 
+def _with_tag(model: str) -> str:
+    """Ollama treats a bare ``llama3`` as ``llama3:latest``."""
+    return model if ":" in model else f"{model}:latest"
+
+
 class OllamaProvider(AIProvider):
     """Generates responses using a locally running Ollama server."""
 
@@ -57,6 +62,24 @@ class OllamaProvider(AIProvider):
             return response.status_code == httpx.codes.OK
         except httpx.HTTPError:
             return False
+
+    def diagnose(self) -> str | None:
+        try:
+            response = self._client.get("/api/tags", timeout=_PING_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            installed = response.json().get("models", [])
+        except (httpx.HTTPError, ValueError):
+            return "Ollama isn't running on this computer."
+        wanted = _with_tag(self._model)
+        names = {
+            _with_tag(str(m.get(key))) for m in installed for key in ("name", "model") if m.get(key)
+        }
+        if wanted not in names:
+            return (
+                f"Ollama is running, but the model {self._model} isn't installed. "
+                f"Install it with: ollama pull {self._model}"
+            )
+        return None
 
     def generate(
         self, prompt: str, context: GenerationContext, purpose: Purpose

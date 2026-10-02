@@ -17,10 +17,17 @@ via ``start_stage_session`` / ``start_practice_session`` — never eagerly.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
-from eaal_platform.auth import hash_password, verify_password
+from eaal_platform.auth import (
+    generate_temporary_password,
+    hash_password,
+    password_problem,
+    verify_password,
+)
 from eaal_platform.db.models import (
     AIAssistanceMode,
     AssessmentKind,
@@ -285,3 +292,128 @@ def start_stage_session(
         db_session.add(session)
         db_session.commit()
         return session.id
+
+
+def update_lab(
+    session_factory: sessionmaker[OrmSession],
+    task_id: int,
+    *,
+    title: str,
+    description: str | None,
+    learning_objective: str | None,
+    difficulty: str | None,
+    course: str | None,
+    division: str | None,
+    batch: str | None,
+    stage_plan: tuple[tuple[AIAssistanceMode, int | None], ...],
+) -> None:
+    """Edit a Lab's details and its stages' AI mode / duration, in place.
+
+    ``stage_plan`` is one ``(ai_assistance_mode, duration_minutes)`` per
+    existing stage, in order. A stage's AI mode is locked once any student
+    has started it: signals are interpreted against the mode a session ran
+    under, so changing it afterwards would silently change what that
+    recorded evidence means. Durations and descriptive fields stay editable.
+    Cohort tags are copied onto the Lab's follow-up assessments so a Transfer
+    Task or Retention Check never drifts out of sync with its parent.
+    """
+    with session_factory() as db_session:
+        task = db_session.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"No task with id {task_id}")
+        if task.assessment_kind is not None:
+            raise ValueError("Follow-up assessments can't be edited here; edit their Lab instead.")
+        if len(stage_plan) != len(task.stages):
+            raise ValueError(f"Expected {len(task.stages)} stage configs, got {len(stage_plan)}")
+
+        for stage, (mode, duration) in zip(task.stages, stage_plan, strict=True):
+            if mode != stage.ai_assistance_mode:
+                started = db_session.query(Session).filter_by(stage_id=stage.id).first()
+                if started is not None:
+                    raise ValueError(
+                        f"The {stage.stage_type.value.title()} stage's AI mode can't be "
+                        "changed because students have already started it."
+                    )
+            stage.ai_assistance_mode = mode
+            stage.duration_minutes = duration
+
+        task.title = title
+        task.description = description
+        task.learning_objective = learning_objective
+        task.difficulty = difficulty
+        task.course = course
+        task.division = division
+        task.batch = batch
+        for followup in db_session.query(Task).filter_by(linked_task_id=task_id):
+            followup.course = course
+            followup.division = division
+            followup.batch = batch
+            followup.learning_objective = learning_objective
+        db_session.commit()
+
+
+def set_lab_archived(
+    session_factory: sessionmaker[OrmSession], task_id: int, *, archived: bool
+) -> None:
+    """Hide a Lab from students (or restore it) without deleting any history."""
+    with session_factory() as db_session:
+        task = db_session.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"No task with id {task_id}")
+        if task.assessment_kind is not None:
+            raise ValueError("Archive the Lab itself; its follow-ups are archived with it.")
+        task.archived_at = datetime.now(UTC) if archived else None
+        db_session.commit()
+
+
+def change_password(
+    session_factory: sessionmaker[OrmSession],
+    *,
+    role: str,
+    user_id: int,
+    current_password: str,
+    new_password: str,
+) -> None:
+    """Replace a signed-in user's password; needs the current one to prove it's them.
+
+    Raises ``ValueError`` (with a message safe to show the user) if the
+    current password is wrong, the new one is too weak, or it's unchanged.
+    """
+    account: Student | Professor | None
+    with session_factory() as db_session:
+        if role == "student":
+            account = db_session.get(Student, user_id)
+        elif role == "professor":
+            account = db_session.get(Professor, user_id)
+        else:
+            raise ValueError(f"Unknown role {role!r}")
+        if account is None or account.password_hash is None:
+            raise ValueError("Account not found.")
+        if not verify_password(current_password, account.password_hash):
+            raise ValueError("Your current password is incorrect.")
+        problem = password_problem(new_password)
+        if problem:
+            raise ValueError(problem)
+        if new_password == current_password:
+            raise ValueError("Choose a password different from your current one.")
+        account.password_hash = hash_password(new_password)
+        if isinstance(account, Student):
+            account.must_change_password = False
+        db_session.commit()
+
+
+def reset_student_password(session_factory: sessionmaker[OrmSession], student_id: int) -> str:
+    """Give a student a new random temporary password and return it (shown once).
+
+    The student must replace it at next sign-in, so the professor who
+    handed it over doesn't keep a working credential.
+    """
+    with session_factory() as db_session:
+        student = db_session.get(Student, student_id)
+        if student is None:
+            raise ValueError(f"No student with id {student_id}")
+        temporary = generate_temporary_password()
+        student.password_hash = hash_password(temporary)
+        student.must_change_password = True
+        db_session.commit()
+        return temporary

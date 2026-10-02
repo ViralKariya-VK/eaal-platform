@@ -53,6 +53,19 @@ def _set_macos_dock_identity() -> None:
         pass
 
 
+def _ask_where_to_save(suggested_name: str) -> str | None:
+    """Show the OS "Save as" dialog; None if the user cancels.
+
+    The webview can't download files on its own (pywebview blocks it by
+    default), so exports are written by Python to a path chosen here.
+    """
+    window = webview.windows[0]
+    chosen = window.create_file_dialog(webview.FileDialog.SAVE, save_filename=suggested_name)
+    if not chosen:
+        return None
+    return chosen if isinstance(chosen, str) else chosen[0]
+
+
 def main() -> int:
     engine = create_db_engine()
     init_db(engine)
@@ -62,7 +75,12 @@ def main() -> int:
     event_logger = EventLogger(session_factory)
     event_logger.start()
 
-    api = CavyApi(session_factory, event_logger, ai_provider=OllamaProvider())
+    api = CavyApi(
+        session_factory,
+        event_logger,
+        ai_provider=OllamaProvider(),
+        save_file_dialog=_ask_where_to_save,
+    )
 
     webview.create_window(
         "CAVY",

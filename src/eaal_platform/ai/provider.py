@@ -84,6 +84,15 @@ class AIProvider(ABC):
         """Cheaply check whether this backend is currently reachable."""
         raise NotImplementedError
 
+    def diagnose(self) -> str | None:
+        """Why this backend can't answer right now, or ``None`` if it's ready.
+
+        Stricter than ``ping``: a backend can be reachable and still unusable
+        (a local server with no model installed, a rejected API key). The
+        message is written for the person using the app, to say what to fix.
+        """
+        return None if self.ping() else "The AI assistant isn't reachable right now."
+
     @property
     @abstractmethod
     def provider_name(self) -> str:

@@ -202,7 +202,7 @@ function showLogin() {
       .login(loginRole, email, password)
       .then((result) => {
         if (result.ok) {
-          enterApp(result.role, result.name);
+          enterApp(result.role, result.name, result.must_change_password);
         } else {
           errorEl.textContent = result.error || "Login failed.";
         }
@@ -291,6 +291,7 @@ let currentUserName = null;
 
 const STUDENT_NAV_ITEMS = [
   { key: "home", label: "Home", icon: "home", action: showLabs },
+  { key: "progress", label: "My Progress", icon: "chart", action: showMyProgress },
   { key: "practice", label: "Practice", icon: "practice", action: startPractice },
   { key: "resources", label: "Resources", icon: "resources", action: showResources },
   { key: "profile", label: "Profile", icon: "profile", action: showProfile },
@@ -299,7 +300,7 @@ const STUDENT_NAV_ITEMS = [
 const PROFESSOR_NAV_ITEMS = [
   { key: "home", label: "Home", icon: "home", action: showProfessorHome },
   { key: "my-labs", label: "My Labs", icon: "layers", action: showMyLabs },
-  { key: "students", label: "Students", icon: "people", action: showStudentsPlaceholder },
+  { key: "students", label: "Students", icon: "people", action: showStudents },
   { key: "reports", label: "Reports", icon: "chart", action: showReportsList },
   { key: "resources", label: "Resources", icon: "resources", action: showResources },
   { key: "profile", label: "Profile", icon: "profile", action: showProfile },
@@ -451,21 +452,256 @@ function showResources() {
 }
 
 function showProfile() {
-  const roleLabel = currentRole === "professor" ? "Professor" : "Student";
-  setScreen(
-    `
+  api()
+    .get_profile()
+    .then((profile) => {
+      const roleLabel = profile.role === "professor" ? "Teacher" : "Student";
+      setScreen(
+        `
     <div class="page-heading"><div><h1>Profile</h1><p class="subtitle">Your CAVY account.</p></div></div>
+    ${
+      profile.must_change_password
+        ? `<div class="notice notice-warn" style="max-width:420px;">Your password was reset by your teacher. Please choose a new one below before you continue.</div>`
+        : ""
+    }
     <div class="card" style="max-width:420px;">
-      <p><b>${escapeHtml(currentUserName || roleLabel)}</b></p>
-      <p class="muted">${roleLabel} account &middot; multi-device sync is coming in a later phase.</p>
+      <p><b>${escapeHtml(profile.name)}</b> <span class="pill pill-neutral">${roleLabel}</span></p>
+      <p class="muted" style="margin-top:6px;">${escapeHtml(profile.email || "")}</p>
+      ${profile.enrollment_no ? `<p class="muted">Enrolment No. ${escapeHtml(profile.enrollment_no)}</p>` : ""}
+      <p class="muted" style="margin-top:6px;">Your data stays on this computer &mdash; multi-device sync is coming in a later phase.</p>
       <button class="danger" id="logoutButton" style="margin-top:16px;">Log Out</button>
+    </div>
+    <div class="card" style="max-width:420px; margin-top:16px;">
+      <h3 style="margin-top:0;">Change Password</h3>
+      <div class="auth-form" style="margin-top:12px;">
+        <label>Current password <input type="password" id="currentPassword" autocomplete="current-password" /></label>
+        <label>New password <input type="password" id="newPassword" placeholder="At least 8 characters" autocomplete="new-password" /></label>
+        <label>Repeat new password <input type="password" id="repeatPassword" autocomplete="new-password" /></label>
+        <p class="auth-error" id="passwordError"></p>
+        <button class="primary" id="changePasswordButton">Update Password</button>
+      </div>
+    </div>
+    <div class="card" style="max-width:420px; margin-top:16px;">
+      <h3 style="margin-top:0;">AI Assistant</h3>
+      <p class="muted" id="aiStatusLine" style="margin:6px 0 14px;">Checking the assistant&hellip;</p>
+      <div class="role-toggle" id="aiProviderToggle">
+        <button data-provider="ollama">Local (Ollama)</button>
+        <button data-provider="groq">Groq (online)</button>
+      </div>
+      <div class="auth-form">
+        <label id="groqKeyField" style="display:none;">Groq API key
+          <input type="password" id="groqKeyInput" placeholder="gsk_..." autocomplete="off" />
+        </label>
+        <p class="muted" id="aiProviderHint"></p>
+        <p class="auth-error" id="aiSettingsError"></p>
+        <button class="primary" id="aiSaveButton">Save &amp; Test</button>
+      </div>
     </div>`,
-    "profile"
-  );
-  document.getElementById("logoutButton").addEventListener("click", () => {
+        "profile"
+      );
+      document.getElementById("logoutButton").addEventListener("click", () => {
+        api()
+          .logout()
+          .then(() => showLogin());
+      });
+      setUpPasswordChange();
+      setUpAiSettings();
+    });
+}
+
+function setUpPasswordChange() {
+  const errorEl = document.getElementById("passwordError");
+  const button = document.getElementById("changePasswordButton");
+  button.addEventListener("click", () => {
+    const current = document.getElementById("currentPassword").value;
+    const next = document.getElementById("newPassword").value;
+    const repeat = document.getElementById("repeatPassword").value;
+    errorEl.className = "auth-error";
+    if (!current || !next) {
+      errorEl.textContent = "Fill in your current and new password.";
+      return;
+    }
+    if (next !== repeat) {
+      errorEl.textContent = "The new passwords don't match.";
+      return;
+    }
+    button.disabled = true;
     api()
-      .logout()
-      .then(() => showLogin());
+      .change_password(current, next)
+      .then((result) => {
+        if (result.ok) {
+          showToast("Password updated.");
+          showProfile();
+        } else {
+          errorEl.textContent = result.error || "Couldn't update the password.";
+        }
+      })
+      .finally(() => {
+        button.disabled = false;
+      });
+  });
+}
+
+// -- AI assistant setup (shown once per launch if the assistant isn't usable) ----------
+
+let aiSetupPromptShown = false;
+
+function maybePromptAiSetup() {
+  if (aiSetupPromptShown) return;
+  aiSetupPromptShown = true;
+  api()
+    .get_ai_settings()
+    .then((settings) => {
+      if (!settings.available) showAiSetupModal(settings);
+    });
+}
+
+function showAiSetupModal(settings, onConnected = () => {}) {
+  document.querySelectorAll(".ai-setup-overlay").forEach((el) => el.remove());
+  const ollamaModel = settings.provider === "ollama" && settings.model ? settings.model : "qwen3:8b";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay ai-setup-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>Set up the AI assistant</h2>
+      <p class="muted">${escapeHtml(settings.problem || "The assistant isn't available right now.")}</p>
+      <div class="role-toggle" id="setupTabs" style="margin-top:14px;">
+        <button class="active" data-tab="groq">Groq (online)</button>
+        <button data-tab="ollama">Ollama (this computer)</button>
+      </div>
+      <div id="setupGroq">
+        <label>Groq API key
+          <input type="password" id="setupGroqKey" placeholder="gsk_..." autocomplete="off" />
+        </label>
+        <p class="muted" style="margin-top:8px;">Runs on Groq's servers, so it works on any computer. Free keys at console.groq.com. The key is kept only until you close CAVY.</p>
+      </div>
+      <div id="setupOllama" style="display:none;">
+        <ol class="setup-steps">
+          <li>Install Ollama from ollama.com.</li>
+          <li>Download the model: <code>ollama pull ${escapeHtml(ollamaModel)}</code></li>
+          <li>Leave Ollama running, then press <b>Check again</b>.</li>
+        </ol>
+        <p class="muted">Runs on this computer. It needs a fairly powerful machine and several GB of disk space.</p>
+      </div>
+      <p class="auth-error" id="setupError" style="margin-top:10px;"></p>
+      <div class="modal-actions">
+        <button class="ghost" id="setupSkip">Not now</button>
+        <button class="primary" id="setupAction">Connect</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  let tab = "groq";
+  const errorEl = overlay.querySelector("#setupError");
+  const action = overlay.querySelector("#setupAction");
+  const selectTab = (next) => {
+    tab = next;
+    overlay.querySelectorAll("#setupTabs button").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === next);
+    });
+    overlay.querySelector("#setupGroq").style.display = next === "groq" ? "" : "none";
+    overlay.querySelector("#setupOllama").style.display = next === "ollama" ? "" : "none";
+    action.textContent = next === "groq" ? "Connect" : "Check again";
+    errorEl.textContent = "";
+  };
+  overlay.querySelectorAll("#setupTabs button").forEach((btn) => {
+    btn.addEventListener("click", () => selectTab(btn.dataset.tab));
+  });
+  overlay.querySelector("#setupSkip").addEventListener("click", () => overlay.remove());
+
+  action.addEventListener("click", () => {
+    const key = overlay.querySelector("#setupGroqKey").value;
+    if (tab === "groq" && !key.trim()) {
+      errorEl.textContent = "Enter a Groq API key.";
+      return;
+    }
+    const idle = action.textContent;
+    action.disabled = true;
+    action.textContent = tab === "groq" ? "Testing…" : "Checking…";
+    errorEl.textContent = "";
+    api()
+      .set_ai_provider(tab, tab === "groq" ? key : "")
+      .then((result) => {
+        if (result.ok && result.available) {
+          overlay.remove();
+          showToast(tab === "groq" ? "Connected to Groq." : "Ollama is ready.");
+          onConnected();
+        } else {
+          errorEl.textContent = result.problem || result.error || "Couldn't connect.";
+        }
+      })
+      .finally(() => {
+        action.disabled = false;
+        action.textContent = idle;
+      });
+  });
+}
+
+const AI_PROVIDER_LABELS = { ollama: "Local (Ollama)", groq: "Groq (online)" };
+const AI_PROVIDER_HINTS = {
+  ollama: "Runs on this computer. Needs Ollama installed and running, with a model pulled.",
+  groq: "Runs on Groq's servers. Free keys at console.groq.com. The key is kept only until you close CAVY.",
+};
+
+function setUpAiSettings() {
+  let selected = "ollama";
+  const statusLine = document.getElementById("aiStatusLine");
+  const errorEl = document.getElementById("aiSettingsError");
+  const saveButton = document.getElementById("aiSaveButton");
+
+  function describe(settings) {
+    const label = AI_PROVIDER_LABELS[settings.provider];
+    if (!label) return "No assistant is configured.";
+    return settings.available
+      ? `Using ${label}${settings.model ? ` · ${settings.model}` : ""} — ready.`
+      : `Using ${label} — ${settings.problem || "not reachable right now."}`;
+  }
+
+  function select(provider) {
+    selected = provider;
+    document.querySelectorAll("#aiProviderToggle button").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.provider === provider);
+    });
+    document.getElementById("groqKeyField").style.display = provider === "groq" ? "" : "none";
+    document.getElementById("aiProviderHint").textContent = AI_PROVIDER_HINTS[provider];
+    errorEl.textContent = "";
+  }
+
+  document.querySelectorAll("#aiProviderToggle button").forEach((btn) => {
+    btn.addEventListener("click", () => select(btn.dataset.provider));
+  });
+
+  select(selected);
+  api()
+    .get_ai_settings()
+    .then((settings) => {
+      statusLine.textContent = describe(settings);
+      if (AI_PROVIDER_LABELS[settings.provider]) select(settings.provider);
+    });
+
+  saveButton.addEventListener("click", () => {
+    const key = document.getElementById("groqKeyInput").value;
+    if (selected === "groq" && !key.trim()) {
+      errorEl.textContent = "Enter a Groq API key.";
+      return;
+    }
+    errorEl.textContent = "";
+    saveButton.disabled = true;
+    saveButton.textContent = "Testing…";
+    api()
+      .set_ai_provider(selected, key)
+      .then((result) => {
+        if (result.ok) {
+          statusLine.textContent = describe(result);
+          document.getElementById("groqKeyInput").value = "";
+        } else {
+          errorEl.textContent = result.error || "Couldn't switch the assistant.";
+        }
+      })
+      .finally(() => {
+        saveButton.disabled = false;
+        saveButton.textContent = "Save & Test";
+      });
   });
 }
 
@@ -522,16 +758,24 @@ function filterLabs(labs, filters) {
   );
 }
 
-function labsTableRows(labs) {
+function labsTableRows(labs, manage) {
   const rows = labs
     .map(
       (lab) => `
     <tr>
-      <td>${escapeHtml(lab.title)}</td>
+      <td>${escapeHtml(lab.title)}${lab.archived ? ` <span class="pill pill-neutral">Archived</span>` : ""}</td>
       <td>${escapeHtml(lab.course || "—")}</td>
       <td>${escapeHtml(lab.division || "—")}</td>
       <td>${escapeHtml(lab.batch || "—")}</td>
-      <td><button class="view-report-button" data-task-id="${lab.id}">${icon("file")}View Report</button></td>
+      <td><div class="row-actions">
+        <button class="view-report-button" data-task-id="${lab.id}">${icon("file")}View Report</button>
+        ${
+          manage
+            ? `<button class="ghost edit-lab-button" data-task-id="${lab.id}">Edit</button>
+               <button class="ghost archive-lab-button" data-task-id="${lab.id}" data-title="${escapeHtml(lab.title)}" data-archived="${lab.archived ? "1" : "0"}">${lab.archived ? "Restore" : "Archive"}</button>`
+            : ""
+        }
+      </div></td>
     </tr>`
     )
     .join("");
@@ -541,9 +785,11 @@ function labsTableRows(labs) {
   );
 }
 
+let showArchivedLabs = false;
+
 function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) {
   api()
-    .get_professor_labs()
+    .get_professor_labs(showCreateButton && showArchivedLabs)
     .then((allLabs) => {
       const render = (labs) => {
         setScreen(
@@ -552,12 +798,17 @@ function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) 
             <div>${eyebrow ? `<div class="eyebrow">${escapeHtml(eyebrow)}</div>` : ""}<h1>${escapeHtml(heading)}</h1><p class="subtitle">${escapeHtml(subtitle)}</p></div>
           </div>
           ${renderFilterBar(allLabs, "labs")}
+          ${
+            showCreateButton
+              ? `<label class="inline-check"><input type="checkbox" id="showArchivedToggle" ${showArchivedLabs ? "checked" : ""} /> Show archived labs</label>`
+              : ""
+          }
           <div class="card" style="padding:0; overflow:hidden;">
             <table class="data-table">
               <thead>
                 <tr><th>Lab</th><th>Course</th><th>Division</th><th>Batch</th><th>Action</th></tr>
               </thead>
-              <tbody>${labsTableRows(labs)}</tbody>
+              <tbody>${labsTableRows(labs, showCreateButton)}</tbody>
             </table>
           </div>
           ${
@@ -578,6 +829,35 @@ function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) 
         document.querySelectorAll(".view-report-button").forEach((btn) => {
           btn.addEventListener("click", () => showLabReport(Number(btn.dataset.taskId)));
         });
+        document.querySelectorAll(".edit-lab-button").forEach((btn) => {
+          btn.addEventListener("click", () => showEditSession(Number(btn.dataset.taskId)));
+        });
+        document.querySelectorAll(".archive-lab-button").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const taskId = Number(btn.dataset.taskId);
+            const restoring = btn.dataset.archived === "1";
+            const refresh = () => renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton);
+            if (restoring) {
+              api().unarchive_lab(taskId).then(refresh);
+              return;
+            }
+            confirmModal({
+              title: `Archive "${btn.dataset.title}"?`,
+              message:
+                "Students will no longer see it and can't start it. Everything already submitted is kept, and you can restore it any time from Show archived labs.",
+              confirmLabel: "Archive",
+              danger: true,
+              onConfirm: () => api().archive_lab(taskId).then(refresh),
+            });
+          });
+        });
+        const archivedToggle = document.getElementById("showArchivedToggle");
+        if (archivedToggle) {
+          archivedToggle.addEventListener("change", () => {
+            showArchivedLabs = archivedToggle.checked;
+            renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton);
+          });
+        }
       };
       render(allLabs);
     });
@@ -656,15 +936,83 @@ function showReportsList() {
   renderLabsScreen("reports", "Reports", "Select a lab to view its report.", "Reports", false);
 }
 
-function showStudentsPlaceholder() {
-  setScreen(
-    `
-    <div class="page-heading"><div><h1>Students</h1><p class="subtitle">Your class roster.</p></div></div>
-    <div class="card">
-      <p class="muted">A student roster spanning every device needs the multi-user sync phase, which isn't built yet — right now each device only has whichever students actually attempted a lab on it (see each lab's Report).</p>
-    </div>`,
-    "students"
-  );
+function showStudents() {
+  api()
+    .get_students()
+    .then((students) => {
+      const rows = students
+        .map(
+          (student) => `
+        <tr>
+          <td>${escapeHtml(student.name)}${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
+          <td>${escapeHtml(student.email || "—")}</td>
+          <td>${escapeHtml(student.enrollment_no || "—")}</td>
+          <td><button class="ghost reset-password-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Reset password</button></td>
+        </tr>`
+        )
+        .join("");
+      setScreen(
+        `
+    <div class="page-heading"><div><h1>Students</h1><p class="subtitle">Students with an account on this computer.</p></div></div>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Email</th><th>Enrolment No.</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="muted" style="padding:16px;">No student accounts yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:12px;">Accounts are stored on the computer they were created on, so this list only includes students who signed up here. A class-wide roster needs the multi-device sync phase.</p>`,
+        "students"
+      );
+      document.querySelectorAll(".reset-password-button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const studentId = Number(btn.dataset.studentId);
+          confirmModal({
+            title: `Reset ${btn.dataset.name}'s password?`,
+            message:
+              "They'll get a temporary password and will be asked to choose a new one the next time they sign in. Their current password stops working immediately.",
+            confirmLabel: "Reset password",
+            danger: true,
+            onConfirm: () =>
+              api()
+                .reset_student_password(studentId)
+                .then((result) => {
+                  if (result.ok) {
+                    showTemporaryPassword(btn.dataset.name, result.temporary_password, showStudents);
+                  } else {
+                    showToast(result.error || "Couldn't reset the password.");
+                  }
+                }),
+          });
+        });
+      });
+    });
+}
+
+// Shown once: the temporary password isn't stored anywhere in readable form.
+function showTemporaryPassword(studentName, temporaryPassword, onClose) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>Temporary password for ${escapeHtml(studentName)}</h2>
+      <p class="muted">Give this to the student now &mdash; it won't be shown again. They'll be asked to replace it when they sign in.</p>
+      <div class="temp-password" id="tempPassword">${escapeHtml(temporaryPassword)}</div>
+      <div class="modal-actions">
+        <button class="ghost" id="copyTempPassword">Copy</button>
+        <button class="primary" id="closeTempPassword">Done</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("copyTempPassword").addEventListener("click", () => {
+    navigator.clipboard?.writeText(temporaryPassword).then(
+      () => showToast("Copied."),
+      () => showToast("Couldn't copy — select the password and copy it manually.")
+    );
+  });
+  document.getElementById("closeTempPassword").addEventListener("click", () => {
+    overlay.remove();
+    onClose();
+  });
 }
 
 // -- Professor: create session -------------------------------------------------------
@@ -681,31 +1029,48 @@ const AI_MODE_OPTIONS = [
   { value: "NONE", label: "No Assistance" },
 ];
 
-function showCreateSession() {
-  const stageCards = STAGE_CONFIG.map(
-    (stage) => `
+function showEditSession(taskId) {
+  api()
+    .get_lab(taskId)
+    .then((lab) => showCreateSession(lab));
+}
+
+function showCreateSession(existing = null) {
+  const editing = existing !== null;
+  const savedStage = (type) => (existing ? existing.stages.find((s) => s.stage_type === type) : null);
+  const stageCards = STAGE_CONFIG.map((stage) => {
+    const saved = savedStage(stage.type);
+    const duration = saved ? saved.duration_minutes ?? "" : stage.defaultMinutes;
+    const selectedMode = saved
+      ? saved.ai_assistance_mode
+      : stage.type === "ASSESSMENT"
+        ? "RESTRICTED"
+        : "FULL";
+    const locked = saved && saved.mode_locked;
+    return `
       <div class="card stage-config-card">
         <h3>${stage.label}</h3>
         <label>
           Duration (minutes)
-          <input type="number" min="1" class="stage-duration" data-stage="${stage.type}" value="${stage.defaultMinutes}" />
+          <input type="number" min="1" class="stage-duration" data-stage="${stage.type}" value="${duration}" />
         </label>
         <label>
           AI Mode
-          <select class="stage-mode" data-stage="${stage.type}">
+          <select class="stage-mode" data-stage="${stage.type}" ${locked ? "disabled" : ""}>
             ${AI_MODE_OPTIONS.map(
               (opt) =>
-                `<option value="${opt.value}" ${stage.type === "ASSESSMENT" && opt.value === "RESTRICTED" ? "selected" : ""}>${opt.label}</option>`
+                `<option value="${opt.value}" ${opt.value === selectedMode ? "selected" : ""}>${opt.label}</option>`
             ).join("")}
           </select>
+          ${locked ? `<span class="muted">Locked — students have already started this stage.</span>` : ""}
         </label>
-      </div>`
-  ).join("");
+      </div>`;
+  }).join("");
 
   setScreen(
     `
-    <button class="back-link" id="backButton">${icon("back")}Back to Dashboard</button>
-    <div class="page-heading"><div><h1>Create New Session</h1><p class="subtitle">Set up a new lab with learning, exploration, and assessment stages.</p></div></div>
+    <button class="back-link" id="backButton">${icon("back")}Back to ${editing ? "My Labs" : "Dashboard"}</button>
+    <div class="page-heading"><div><h1>${editing ? "Edit Session" : "Create New Session"}</h1><p class="subtitle">${editing ? "Change this lab's details, timing and AI settings." : "Set up a new lab with learning, exploration, and assessment stages."}</p></div></div>
     <div class="card">
       <h3 style="margin-bottom:14px;">Session Details</h3>
       <div class="form-grid">
@@ -742,7 +1107,7 @@ function showCreateSession() {
       <div class="stage-config-grid">${stageCards}</div>
     </div>
     <div class="button-row" style="margin-top:16px;">
-      <button class="primary" id="createLabButton">Create Lab ${icon("arrowRight")}</button>
+      <button class="primary" id="createLabButton">${editing ? "Save Changes" : "Create Lab"} ${icon("arrowRight")}</button>
       <span class="muted" id="createLabError"></span>
     </div>
   `,
@@ -777,30 +1142,84 @@ function showCreateSession() {
       stages,
     };
 
+    if (!editing) {
+      api()
+        .create_lab(payload)
+        .then(() => showMyLabs());
+      return;
+    }
+    // A locked stage's <select> is disabled, so send back the mode it already has.
+    payload.stages.forEach((stage, index) => {
+      if (existing.stages[index].mode_locked) {
+        stage.ai_assistance_mode = existing.stages[index].ai_assistance_mode;
+      }
+    });
     api()
-      .create_lab(payload)
-      .then(() => showMyLabs());
+      .update_lab(existing.id, payload)
+      .then((result) => {
+        if (result.ok) showMyLabs();
+        else errorEl.textContent = result.error || "Couldn't save the changes.";
+      });
   });
+
+  if (editing) {
+    const set = (id, value) => (document.getElementById(id).value = value || "");
+    set("sessionTitle", existing.title);
+    set("sessionCourse", existing.course);
+    set("sessionTopic", existing.topic);
+    set("sessionDivision", existing.division);
+    set("sessionBatch", existing.batch);
+    set("sessionDescription", existing.description);
+    if (existing.difficulty) document.getElementById("sessionDifficulty").value = existing.difficulty;
+  }
 }
 
 // -- Professor: lab report -------------------------------------------------------
 
-function exportReportCsv(report) {
-  const header = ["Student Name", "Enrolment No.", "Score", "Submitted On", "Status"];
-  const lines = [header, ...report.rows.map((row) => [
-    row.student_name,
-    row.enrollment_no || "",
-    row.score === null ? "" : row.score,
-    row.submitted_at || "",
-    row.status,
-  ])].map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${report.task_title.replace(/[^\w.-]+/g, "_")}_report.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+function exportReport(taskId, button) {
+  const idleLabel = button.innerHTML;
+  button.disabled = true;
+  api()
+    .export_lab_report(taskId)
+    .then((result) => {
+      if (result.ok) showToast(`Report saved to ${result.path}`);
+      else if (!result.cancelled) showToast(result.error || "Couldn't save the report.");
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = idleLabel;
+    });
+}
+
+// A small notice that fades on its own — used for results with no screen of their own.
+function showToast(message) {
+  document.querySelectorAll(".toast").forEach((el) => el.remove());
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 5000);
+}
+
+// In-app confirmation. (window.confirm() isn't reliable inside a pywebview window.)
+function confirmModal({ title, message, confirmLabel, danger, onConfirm }) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>${escapeHtml(title)}</h2>
+      <p class="muted">${escapeHtml(message)}</p>
+      <div class="modal-actions">
+        <button class="ghost" id="confirmCancel">Cancel</button>
+        <button class="${danger ? "danger" : "primary"}" id="confirmOk">${escapeHtml(confirmLabel)}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("confirmCancel").addEventListener("click", () => overlay.remove());
+  document.getElementById("confirmOk").addEventListener("click", () => {
+    overlay.remove();
+    onConfirm();
+  });
 }
 
 function showAddFollowupModal(sourceTaskId, onDone) {
@@ -943,9 +1362,8 @@ function showLabReport(taskId) {
     );
 
     document.getElementById("backButton").addEventListener("click", showMyLabs);
-    document.getElementById("exportReportButton").addEventListener("click", () => {
-      exportReportCsv(report);
-    });
+    const exportButton = document.getElementById("exportReportButton");
+    exportButton.addEventListener("click", () => exportReport(taskId, exportButton));
     wireFilterBar(allLabs, "report", (filters) => {
       const matches = filterLabs(allLabs, filters);
       if (matches.length > 0) showLabReport(matches[0].id);
@@ -1483,13 +1901,22 @@ function renderChatPanel(container, info, getFiles) {
 
   if (restricted) return;
 
-  api()
-    .ping_ai()
-    .then((available) => {
-      document.getElementById("chatStatus").textContent = available
-        ? "Assistant ready"
-        : "Assistant not available";
-    });
+  const refreshChatStatus = () =>
+    api()
+      .get_ai_settings()
+      .then((settings) => {
+        const el = document.getElementById("chatStatus");
+        if (!el) return;
+        if (settings.available) {
+          el.textContent = "Assistant ready";
+          return;
+        }
+        el.innerHTML = `Assistant not available — <button class="auth-link" id="chatSetupLink">Set up</button>`;
+        document.getElementById("chatSetupLink").addEventListener("click", () => {
+          showAiSetupModal(settings, refreshChatStatus);
+        });
+      });
+  refreshChatStatus();
 
   const input = document.getElementById("chatInput");
   const sendButton = document.getElementById("chatSendButton");
@@ -1661,35 +2088,178 @@ function showCiqScore(sessionId) {
     });
 }
 
+// -- My Progress (student's long-run learning) ------------------------------
+
+const TREND_TEXT = {
+  up: "Improving",
+  down: "Slipping",
+  steady: "Steady",
+  not_enough_data: "Needs more sessions",
+};
+
+function sparkline(series, width = 120, height = 32) {
+  if (series.length < 2) return "";
+  const step = width / (series.length - 1);
+  const points = series
+    .map((v, i) => `${(i * step).toFixed(1)},${(height - (v / 100) * height).toFixed(1)}`)
+    .join(" ");
+  return `<svg class="sparkline" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function trendChart(series) {
+  if (series.length < 2) {
+    return `<p class="muted">Complete at least two sessions to see your trend.</p>`;
+  }
+  const w = 640;
+  const h = 180;
+  const pad = { l: 34, r: 12, t: 10, b: 22 };
+  const x = (i) => pad.l + (i * (w - pad.l - pad.r)) / (series.length - 1);
+  const y = (v) => pad.t + (1 - v / 100) * (h - pad.t - pad.b);
+  const grid = [0, 50, 100]
+    .map(
+      (v) =>
+        `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y(v)}" y2="${y(v)}" class="chart-grid"/><text x="${pad.l - 6}" y="${y(v) + 4}" class="chart-label" text-anchor="end">${v}</text>`
+    )
+    .join("");
+  const line = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const dots = series
+    .map(
+      (v, i) =>
+        `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5" class="chart-dot"><title>Session ${i + 1}: ${v}</title></circle>`
+    )
+    .join("");
+  return `<svg class="trend-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="CIQ over your sessions">${grid}<polyline points="${line}" class="chart-line"/>${dots}<text x="${pad.l}" y="${h - 4}" class="chart-label">Oldest</text><text x="${w - pad.r}" y="${h - 4}" class="chart-label" text-anchor="end">Latest</text></svg>`;
+}
+
+function trendBadge(trend) {
+  const text = TREND_TEXT[trend.direction] || "";
+  const change =
+    trend.change === null || trend.direction === "steady"
+      ? ""
+      : ` (${trend.change > 0 ? "+" : ""}${trend.change})`;
+  return `<span class="trend trend-${trend.direction}">${text}${change}</span>`;
+}
+
+function formatMinutes(total) {
+  if (total < 60) return `${total} min`;
+  return `${Math.floor(total / 60)} h ${total % 60} min`;
+}
+
+function signalChips(items, emptyText) {
+  if (!items.length) return `<p class="muted">${emptyText}</p>`;
+  return items
+    .map(
+      (s) =>
+        `<div class="signal-row"><span class="signal-name">${s.key} &middot; ${escapeHtml(SIGNAL_NAMES[s.key] || s.key)}</span><span class="signal-bar-track"><span class="signal-bar-fill" style="width:${s.score}%"></span></span><span class="signal-value">${Math.round(s.score)}%</span></div>`
+    )
+    .join("");
+}
+
+function showMyProgress() {
+  setScreen(
+    `<div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
+     <div class="card"><p class="muted">Loading your progress&hellip; sessions that haven't been scored yet are scored now, which can take a moment.</p></div>`,
+    "progress"
+  );
+  api()
+    .get_my_progress()
+    .then((data) => {
+      const t = data.totals;
+      if (!t.sessions) {
+        setScreen(
+          `<div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
+           <div class="card"><h3>Nothing to show yet</h3><p class="muted">Submit your first lab or practice session and your progress will appear here.</p></div>`,
+          "progress"
+        );
+        return;
+      }
+      const stat = (label, value) =>
+        `<div class="card progress-stat"><div class="progress-stat-value">${value}</div><div class="muted">${label}</div></div>`;
+      const pillars = data.pillars
+        .map(
+          (p) => `
+        <div class="card pillar-progress">
+          <h3>${escapeHtml(p.heading)}</h3>
+          <div class="pillar-score">${p.latest === null ? "&ndash;" : Math.round(p.latest)}<span class="muted"> latest</span></div>
+          ${sparkline(p.series)}
+          <div>${trendBadge(p)}</div>
+          <div class="muted">Average ${p.average === null ? "&ndash;" : Math.round(p.average)}</div>
+        </div>`
+        )
+        .join("");
+      const kindLabel = { lab: "Lab", practice: "Practice", followup: "Follow-up" };
+      const rows = data.history
+        .map(
+          (h) => `
+        <tr>
+          <td>${new Date(h.submitted_at).toLocaleDateString()}</td>
+          <td>${escapeHtml(h.title)}${h.stage ? ` <span class="muted">&middot; ${escapeHtml(STAGE_LABELS[h.stage] || h.stage)}</span>` : ""}</td>
+          <td>${kindLabel[h.kind] || h.kind}</td>
+          <td>${h.ai_interactions}</td>
+          <td>${h.score === null ? "&ndash;" : Math.round(h.score)}</td>
+          <td><button class="ghost progress-detail" data-session-id="${h.session_id}">Details</button></td>
+        </tr>`
+        )
+        .join("");
+
+      setScreen(
+        `
+        <div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
+        <div class="progress-stat-grid">
+          ${stat("Sessions submitted", t.sessions)}
+          ${stat("Labs attempted", t.labs)}
+          ${stat("Practice sessions", t.practice)}
+          ${stat("Time spent", formatMinutes(t.minutes))}
+          ${stat("Average CIQ", t.average_score === null ? "&ndash;" : Math.round(t.average_score))}
+        </div>
+        <div class="card" style="margin-top:14px;">
+          <div class="chart-head"><h3>CIQ over time</h3>${trendBadge(data.overall)}</div>
+          ${trendChart(data.overall.series)}
+        </div>
+        <div class="pillar-progress-grid">${pillars}</div>
+        <div class="two-col">
+          <div class="card"><h3>Strongest areas</h3>${signalChips(data.strengths, "Not enough data yet.")}</div>
+          <div class="card"><h3>Room to grow</h3>${signalChips(data.growth_areas, "Not enough data yet.")}</div>
+        </div>
+        <div class="card" style="margin-top:14px;">
+          <h3>Session history</h3>
+          <table class="data-table progress-history-table">
+            <thead><tr><th>Date</th><th>Session</th><th>Type</th><th>AI chats</th><th>CIQ</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="muted" style="margin-top:10px;">CIQ here is a provisional equal-weight average of the signals available for each session, not a validated grade.</p>
+        </div>
+      `,
+        "progress"
+      );
+      app.querySelectorAll(".progress-detail").forEach((button) => {
+        button.addEventListener("click", () => showCiqScore(Number(button.dataset.sessionId)));
+      });
+    });
+}
+
 // -- Bootstrap -------------------------------------------------------
 
-function enterApp(role, name) {
+function enterApp(role, name, mustChangePassword = false) {
   currentRole = role;
   currentUserName = name;
   document.getElementById("root").classList.remove("auth-mode");
   document.getElementById("studentAvatar").textContent = (name || "?").charAt(0).toUpperCase();
   document.getElementById("studentAvatar").title = name || "";
   renderSidebar();
-  if (role === "professor") {
+  if (mustChangePassword) {
+    showProfile();
+  } else if (role === "professor") {
     showMyLabs();
+    maybePromptAiSetup();
   } else {
     showLabs();
+    maybePromptAiSetup();
   }
 }
 
 function init() {
-  api()
-    .login("student", "student@cavy.local", "student123")
-    .then((res) => {
-      enterApp(res.role, res.name);
-      return api().get_labs();
-    })
-    .then((labs) => api().get_stages(labs[0].id))
-    .then((data) => api().start_stage(data.stages[2].id))
-    .then((info) => showWorkspace(info))
-    .catch((err) => {
-      document.body.innerHTML = `<pre style="color:red;font-size:20px;padding:40px;">${err}\n${err.stack || ""}</pre>`;
-    });
+  showLogin();
 }
 
 if (window.pywebview) {

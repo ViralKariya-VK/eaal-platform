@@ -1159,6 +1159,7 @@ button.ghost {
   overflow: hidden;
 }
 .signal-bar-fill {
+  display: block;
   height: 100%;
   background: var(--teal-500);
   border-radius: var(--radius-pill);
@@ -1231,6 +1232,7 @@ label {
   color: var(--red-text);
 }
 input[type="text"],
+input[type="password"],
 input[type="number"],
 select,
 textarea {
@@ -1539,4 +1541,161 @@ textarea {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* -- Lab management (edit / archive / export) -------------------------------------------- */
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.inline-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--text-muted);
+}
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 70vw;
+  padding: 11px 18px;
+  border-radius: var(--radius-control);
+  background: var(--navy-900);
+  color: var(--text-on-navy);
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  z-index: 1100;
+}
+
+/* -- Accounts ----------------------------------------------------------------------------- */
+.notice {
+  padding: 11px 14px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.notice-warn {
+  background: var(--amber-bg, #f6ead2);
+  color: var(--amber-text, #7a5a14);
+}
+.temp-password {
+  margin: 14px 0 6px;
+  padding: 14px;
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 22px;
+  letter-spacing: 2px;
+  background: var(--cream-50);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-control);
+  user-select: all;
+}
+
+/* -- AI setup dialog ---------------------------------------------------------------------- */
+.setup-steps {
+  margin: 12px 0 8px 18px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.setup-steps code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+  background: var(--cream-50);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  user-select: all;
+}
+
+/* -- My Progress ------------------------------------------------------------------- */
+.progress-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.progress-stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.trend-chart {
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
+}
+.chart-grid {
+  stroke: var(--cream-100);
+  stroke-width: 1;
+}
+.chart-label {
+  font-size: 10px;
+  fill: var(--text-muted);
+}
+.chart-line {
+  fill: none;
+  stroke: var(--teal-500);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.chart-dot {
+  fill: var(--teal-500);
+}
+.pillar-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.pillar-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--teal-500);
+}
+.pillar-progress h3 {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.pillar-score {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sparkline {
+  color: var(--teal-500);
+}
+.trend {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.trend-up {
+  color: #1f7a4d;
+}
+.trend-down {
+  color: #b4532a;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 800px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+}
+.progress-history-table {
+  margin-top: 12px;
 }

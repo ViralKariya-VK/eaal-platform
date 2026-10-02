@@ -143,3 +143,47 @@ def test_api_key_never_appears_in_request_body() -> None:
     provider.generate("hi", GenerationContext(), Purpose.CHAT)
 
     assert "super-secret-key" not in json.dumps(captured["body"])
+
+
+# -- diagnose() ---------------------------------------------------------------------------------
+
+
+def test_diagnose_ready_on_200() -> None:
+    provider = GroqProvider(
+        api_key="test-key",
+        client=_client_with_handler(lambda request: httpx.Response(200, json={"data": []})),
+    )
+    assert provider.diagnose() is None
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_diagnose_rejected_key(status: int) -> None:
+    provider = GroqProvider(
+        api_key="test-key",
+        client=_client_with_handler(lambda request: httpx.Response(status)),
+    )
+    assert provider.diagnose() == "Groq rejected the API key. Check it in Profile."
+
+
+def test_diagnose_no_network() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    provider = GroqProvider(api_key="test-key", client=_client_with_handler(handler))
+    assert "internet connection" in (provider.diagnose() or "")
+
+
+def test_diagnose_server_error_reports_the_status() -> None:
+    provider = GroqProvider(
+        api_key="test-key",
+        client=_client_with_handler(lambda request: httpx.Response(503)),
+    )
+    assert "503" in (provider.diagnose() or "")
+
+
+def test_diagnose_never_leaks_the_key() -> None:
+    provider = GroqProvider(
+        api_key="test-key",
+        client=_client_with_handler(lambda request: httpx.Response(401)),
+    )
+    assert "test-key" not in (provider.diagnose() or "")

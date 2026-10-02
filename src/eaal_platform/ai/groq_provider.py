@@ -57,6 +57,17 @@ class GroqProvider(AIProvider):
         except httpx.HTTPError:
             return False
 
+    def diagnose(self) -> str | None:
+        try:
+            response = self._client.get("/models", timeout=_PING_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            return "Can't reach Groq. Check your internet connection."
+        if response.status_code in (401, 403):
+            return "Groq rejected the API key. Check it in Profile."
+        if response.status_code != httpx.codes.OK:
+            return f"Groq returned an error ({response.status_code}). Try again shortly."
+        return None
+
     def generate(
         self, prompt: str, context: GenerationContext, purpose: Purpose
     ) -> GenerationResult:

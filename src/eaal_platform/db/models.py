@@ -18,7 +18,7 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -110,6 +110,11 @@ class Student(Base):
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
     enrollment_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # True after a professor resets this student's password: the temporary
+    # one works to sign in, but the student is asked to replace it right away.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -171,6 +176,10 @@ class Task(Base):
     assessment_kind: Mapped[AssessmentKind | None] = mapped_column(
         Enum(AssessmentKind), nullable=True
     )
+    # Set when a professor archives a lab: it disappears from students' lists
+    # and new work on it is blocked, but every session/event/score already
+    # recorded against it is kept (deleting would erase students' history).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

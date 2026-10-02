@@ -30,3 +30,6 @@ node_modules/
 /CAVY.app/
 
 .DS_Store
+
+# Local API keys — never commit
+groq.txt

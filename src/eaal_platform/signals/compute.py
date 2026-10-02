@@ -88,17 +88,64 @@ _RETENTION_MIN_DELAY_HOURS = 24
 _CONCEPT_CHECK_RUBRIC_INSTRUCTION = (
     "You are scoring a student's written explanation of the concept behind "
     "their coding solution, using one measure from the EAAL research "
-    "framework. Score from 0.0 (poor) to 1.0 (excellent):\n"
-    "- conceptual_understanding: does the explanation demonstrate genuine "
-    "understanding of the underlying concept and why the approach works — "
-    "not just a restatement of what the code does line by line? 0 means no "
-    "real understanding shown, or a description of surface mechanics only; "
-    "1 means clear, accurate understanding of the underlying concept.\n\n"
+    "framework: conceptual_understanding, from 0.0 (poor) to 1.0 (excellent).\n\n"
+    "What matters is whether the explanation says WHY the approach works, not "
+    "WHAT the code does. Judge it in this order:\n"
+    "1. Does it give a reason, principle or property that makes the approach "
+    "correct or efficient? For instance: why the problem can be reduced or "
+    "split, what stays true at every step, why some cases can safely be "
+    "ignored, or what the cost is and why.\n"
+    "2. Or does it only narrate the operations the code performs, in order "
+    '("first this, then that, then the next thing")? Narrating the steps is '
+    "NOT understanding, however long, precise or confident it sounds, and "
+    "even when every step is described correctly. Stating which branch is taken "
+    'for which comparison ("if this, do that") is also just narration, unless '
+    "the explanation says why that branch is the right one.\n"
+    "3. Does it state anything about the concept that is factually wrong?\n\n"
+    "Score bands:\n"
+    "- 0.9 to 1.0: states the key idea AND why it is valid, often with a "
+    "consequence such as an invariant or the cost.\n"
+    "- 0.6 to 0.8: states the correct key idea, briefly or without full "
+    "justification. A short explanation that names the right reason is fine "
+    "and must not be penalised for being short.\n"
+    "- 0.2 to 0.4: only narrates the steps in order, never saying why they "
+    "work.\n"
+    "- 0.0 to 0.1: vague with no real content, admits not understanding, or "
+    "says something factually wrong about the concept.\n"
+    "Do not reward length, detail about variable names, or a confident tone.\n\n"
     "Task:\n{task_description}\n\n"
     'The student\'s explanation:\n"""\n{response}\n"""\n\n'
     "Respond with ONLY a JSON object of the form "
-    '{{"conceptual_understanding": <float 0-1>}}. No other text.'
+    '{{"explains_why": <true or false>, "only_narrates_steps": <true or false>, '
+    '"states_something_incorrect": <true or false>, '
+    '"conceptual_understanding": <float 0-1>}}. No other text.'
 )
+
+# The small local model is reliable at the yes/no judgements above but loose
+# at turning them into a number: in testing it would correctly say "this only
+# narrates the steps" and then still write 0.6 (or 1.0 under the previous
+# prompt). So the rubric's own score bands are enforced here: an explanation
+# the model itself judges to be narration-only can't score above the top of
+# the "narration" band, and one it judges factually wrong can't score above
+# the bottom band. Both caps only ever lower a score, and are skipped when the
+# model didn't return the judgement (older/other providers).
+_NARRATION_ONLY_MAX_SCORE = 0.4
+_FACTUALLY_WRONG_MAX_SCORE = 0.1
+
+
+def _concept_score_from_model_json(data: dict[str, Any]) -> tuple[float, bool]:
+    """The S3.1 value for a parsed model reply, and whether a band cap lowered it.
+
+    Raises ``KeyError``/``TypeError``/``ValueError`` if the score itself is
+    missing or not a number, like the other rubric parsers.
+    """
+    raw = _clamp01(float(data["conceptual_understanding"]))
+    value = raw
+    if data.get("only_narrates_steps") is True and data.get("explains_why") is False:
+        value = min(value, _NARRATION_ONLY_MAX_SCORE)
+    if data.get("states_something_incorrect") is True:
+        value = min(value, _FACTUALLY_WRONG_MAX_SCORE)
+    return value, value < raw
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,10 +713,13 @@ def _signal_conceptual_understanding(
         return SignalResult(None, "the AI evaluator did not return a usable score")
     try:
         data = json.loads(result.text)
-        value = _clamp01(float(data["conceptual_understanding"]))
+        value, capped = _concept_score_from_model_json(data)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         return SignalResult(None, "the AI evaluator did not return a usable score")
-    return SignalResult(value, evidence={"response_length": len(response.response_text)})
+    evidence: dict[str, Any] = {"response_length": len(response.response_text)}
+    if capped:
+        evidence["capped_by_rubric_band"] = True
+    return SignalResult(value, evidence=evidence)
 
 
 def compute_all_signals(

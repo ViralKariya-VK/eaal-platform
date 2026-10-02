@@ -33,6 +33,8 @@ from scipy.stats import spearmanr
 from validation.harness import DATA_DIR
 from validation.labeled_examples import (
     CONCEPT_UNDERSTANDING_EXAMPLES,
+    CONCEPT_UNDERSTANDING_FRESH_EXAMPLES,
+    CONCEPT_UNDERSTANDING_HELDOUT_EXAMPLES,
     HELP_SEEKING_EXAMPLES,
 )
 
@@ -42,6 +44,7 @@ from eaal_platform.signals.compute import (
     _CONCEPT_CHECK_RUBRIC_INSTRUCTION,
     _RUBRIC_INSTRUCTION,
     _clamp01,
+    _concept_score_from_model_json,
 )
 
 N_REPEATS = 5
@@ -95,16 +98,27 @@ def run_help_seeking(provider: OllamaProvider) -> list[dict]:
     return rows
 
 
+# (set name, examples). The held-out set was written before the S3.1 rubric was
+# revised; the fresh set after the held-out one had already been used while
+# revising it. See labeled_examples.py for the full history.
+CONCEPT_EXAMPLE_SETS = [
+    ("tuning", CONCEPT_UNDERSTANDING_EXAMPLES),
+    ("held_out", CONCEPT_UNDERSTANDING_HELDOUT_EXAMPLES),
+    ("fresh", CONCEPT_UNDERSTANDING_FRESH_EXAMPLES),
+]
+
+
 def run_concept_understanding(provider: OllamaProvider) -> list[dict]:
     rows = []
-    for i, example in enumerate(CONCEPT_UNDERSTANDING_EXAMPLES):
+    tagged = [(name, ex) for name, examples in CONCEPT_EXAMPLE_SETS for ex in examples]
+    for i, (set_name, example) in enumerate(tagged):
         prompt = _CONCEPT_CHECK_RUBRIC_INSTRUCTION.format(
             task_description=example.task_description, response=example.response_text
         )
         context = GenerationContext(task_description=example.task_description)
         scores: list[float] = []
         parse_failures = 0
-        total = len(CONCEPT_UNDERSTANDING_EXAMPLES)
+        total = len(tagged)
         for r in range(N_REPEATS):
             print(f"[{i + 1}/{total}] {example.label} repeat {r + 1}/{N_REPEATS}", flush=True)
             data = _call_rubric(provider, prompt, context)
@@ -112,11 +126,12 @@ def run_concept_understanding(provider: OllamaProvider) -> list[dict]:
                 parse_failures += 1
                 continue
             try:
-                scores.append(_clamp01(float(data["conceptual_understanding"])))
-            except (TypeError, ValueError):
+                scores.append(_concept_score_from_model_json(data)[0])
+            except (KeyError, TypeError, ValueError):
                 parse_failures += 1
         rows.append(
             {
+                "set": set_name,
                 "label": example.label,
                 "response_text": example.response_text,
                 "expected_rank": example.expected_rank,
@@ -147,12 +162,52 @@ def _face_validity(expected_ranks: list[int], mean_scores: list[float]) -> dict:
     return {"spearman_r": float(rho), "p_value": float(p)}
 
 
+def run_concept_only(provider: OllamaProvider) -> None:
+    """Score S3.1 on every example set; write a separate summary (leaves the
+    help-seeking evidence from the full run untouched)."""
+    rows = run_concept_understanding(provider)
+    by_set = {}
+    for name, _ in CONCEPT_EXAMPLE_SETS:
+        subset = [r for r in rows if r["set"] == name and r["scores"]]
+        by_set[name] = {
+            "n_examples": len(subset),
+            "reliability": _reliability_stats([r["scores"] for r in subset]),
+            "face_validity": _face_validity(
+                [r["expected_rank"] for r in subset],
+                [statistics.mean(r["scores"]) for r in subset],
+            ),
+        }
+    scored = [r for r in rows if r["scores"]]
+    summary = {
+        "n_repeats_per_example": N_REPEATS,
+        "model": provider.model_name,
+        "all_sets_pooled": {
+            "n_examples": len(scored),
+            "face_validity": _face_validity(
+                [r["expected_rank"] for r in scored],
+                [statistics.mean(r["scores"]) for r in scored],
+            ),
+            "total_parse_failures": sum(r["parse_failures"] for r in rows),
+        },
+        "by_set": by_set,
+    }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "llm_concept_understanding_v2_raw.json").write_text(json.dumps(rows, indent=2))
+    (DATA_DIR / "llm_concept_understanding_v2_summary.json").write_text(
+        json.dumps(summary, indent=2)
+    )
+    print(json.dumps(summary, indent=2))
+
+
 def main() -> None:
     provider = OllamaProvider()
     if not provider.ping():
         print("Ollama is not reachable at localhost:11434 - aborting LLM validation.")
         sys.exit(1)
     print(f"Using live provider: {provider.provider_name} / {provider.model_name}")
+    if "--concept-only" in sys.argv:
+        run_concept_only(provider)
+        return
 
     help_seeking_rows = run_help_seeking(provider)
     concept_rows = run_concept_understanding(provider)

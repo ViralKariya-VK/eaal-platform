@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
@@ -17,7 +18,11 @@ from eaal_platform.ai.provider import AIProvider, GenerationContext, GenerationR
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.db.bootstrap import create_student_account, seed_demo_content
 from eaal_platform.events.logger import EventLogger
-from eaal_platform.signals.compute import compute_all_signals
+from eaal_platform.signals.compute import (
+    _CONCEPT_CHECK_RUBRIC_INSTRUCTION,
+    _concept_score_from_model_json,
+    compute_all_signals,
+)
 
 
 class _ScriptedProvider(AIProvider):
@@ -523,3 +528,99 @@ def test_conceptual_understanding_none_when_ai_evaluator_unavailable(
     logger.stop()
     results = _signals(db_session_factory, session_id, provider)
     assert results["S3.1"].value is None
+
+
+# -- S3.1 rubric: narration / wrong-claim score caps ------------------------------------------
+
+
+def _reply(**fields: object) -> dict[str, object]:
+    return {"conceptual_understanding": 0.9, **fields}
+
+
+def test_narration_only_is_capped_at_the_top_of_its_band() -> None:
+    value, capped = _concept_score_from_model_json(
+        _reply(explains_why=False, only_narrates_steps=True, states_something_incorrect=False)
+    )
+    assert (value, capped) == (0.4, True)
+
+
+def test_a_factually_wrong_explanation_is_capped_lower_still() -> None:
+    value, capped = _concept_score_from_model_json(
+        _reply(explains_why=False, only_narrates_steps=False, states_something_incorrect=True)
+    )
+    assert (value, capped) == (0.1, True)
+
+
+def test_an_explanation_that_gives_the_reason_is_not_capped() -> None:
+    value, capped = _concept_score_from_model_json(
+        _reply(explains_why=True, only_narrates_steps=False, states_something_incorrect=False)
+    )
+    assert (value, capped) == (0.9, False)
+
+
+def test_caps_never_raise_a_score_the_model_already_made_low() -> None:
+    value, capped = _concept_score_from_model_json(
+        {
+            "conceptual_understanding": 0.2,
+            "explains_why": False,
+            "only_narrates_steps": True,
+            "states_something_incorrect": False,
+        }
+    )
+    assert (value, capped) == (0.2, False)
+
+
+def test_replies_without_the_judgements_are_scored_as_before() -> None:
+    assert _concept_score_from_model_json({"conceptual_understanding": 0.75}) == (0.75, False)
+
+
+def test_contradictory_or_malformed_judgements_do_not_trigger_a_cap() -> None:
+    # Narration flag set, but the model also says it explains why: don't guess.
+    assert _concept_score_from_model_json(_reply(explains_why=True, only_narrates_steps=True)) == (
+        0.9,
+        False,
+    )
+    # Judgements as strings rather than JSON booleans are ignored, not trusted.
+    assert _concept_score_from_model_json(
+        _reply(explains_why="false", only_narrates_steps="true")
+    ) == (0.9, False)
+
+
+def test_score_is_still_required_and_clamped() -> None:
+    with pytest.raises(KeyError):
+        _concept_score_from_model_json({"explains_why": False})
+    assert _concept_score_from_model_json({"conceptual_understanding": 7})[0] == 1.0
+
+
+def test_concept_prompt_formats_and_asks_for_every_field() -> None:
+    prompt = _CONCEPT_CHECK_RUBRIC_INSTRUCTION.format(
+        task_description="TASK-TEXT", response="RESPONSE-TEXT"
+    )
+
+    assert "TASK-TEXT" in prompt
+    assert "RESPONSE-TEXT" in prompt
+    for key in (
+        "explains_why",
+        "only_narrates_steps",
+        "states_something_incorrect",
+        "conceptual_understanding",
+    ):
+        assert f'"{key}"' in prompt
+
+
+def test_s31_end_to_end_applies_the_cap_and_records_it(
+    db_session_factory: sessionmaker[OrmSession],
+) -> None:
+    provider = _ScriptedProvider()
+    provider.concept_rubric_response = json.dumps(
+        _reply(explains_why=False, only_narrates_steps=True, states_something_incorrect=False)
+    )
+    api, logger = _make_api(db_session_factory, provider)
+    session_id = api.start_practice()["session_id"]
+    api.submit_concept_check(session_id, "First I set x, then I loop, then I return.")
+
+    logger.stop()
+    result = _signals(db_session_factory, session_id, provider)["S3.1"]
+
+    assert result.value == 0.4
+    assert result.evidence["capped_by_rubric_band"] is True
