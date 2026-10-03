@@ -901,6 +901,7 @@ class CavyApi:
         # provisional convenience for the report table, not a validated
         # score. The full per-signal breakdown remains the source of truth
         # (see `get_ciq_score`).
+        self._event_logger.flush()
         results = compute_all_signals(self._session_factory, session_id, self._ai_provider)
         values = [result.value for result in results.values() if result.value is not None]
         if not values:
@@ -1255,6 +1256,9 @@ class CavyApi:
             return {"submitted_at": submitted_at, "exit_status": exit_status, "label": label}
 
     def get_ciq_score(self, session_id: int) -> dict[str, Any]:
+        # Events are written by a background thread; make sure the latest ones
+        # are saved before they are counted.
+        self._event_logger.flush()
         with self._session_factory() as db_session:
             event_count = db_session.query(Event).filter_by(session_id=session_id).count()
             snapshot_count = db_session.query(CodeSnapshot).filter_by(session_id=session_id).count()
@@ -1296,6 +1300,7 @@ class CavyApi:
         can be slow and later calls are quick.
         """
         student_id = self._require_student_id()
+        self._event_logger.flush()
         with self._session_factory() as db_session:
             session_ids = [
                 row.id
