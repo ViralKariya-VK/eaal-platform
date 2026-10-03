@@ -84,6 +84,8 @@ def _posix_preexec(memory_limit_bytes: int, cpu_time_seconds: int) -> None:
     Import ``resource`` here (not at module scope) so this module still
     imports cleanly on Windows — the function is simply never called there.
     """
+    if sys.platform == "win32":  # never called there; also tells the type checker
+        return
     import resource
 
     if _SUPPORTS_MEMORY_LIMIT:

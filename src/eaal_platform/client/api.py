@@ -226,7 +226,7 @@ class ClientApi:
 def _open_with_system(path: Path) -> None:
     """Hand a file to the operating system's default program for it."""
     if sys.platform == "win32":
-        os.startfile(path)  # type: ignore[attr-defined]  # nosec B606 - a file we just wrote
+        os.startfile(path)  # nosec B606 - a file we just wrote
     elif sys.platform == "darwin":
         subprocess.run(["open", str(path)], check=True)  # nosec B603, B607
     else:
