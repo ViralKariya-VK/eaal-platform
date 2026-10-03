@@ -16,14 +16,17 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import platform
 import shutil
 import subprocess  # nosec B404 - this script's job is running build tools
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+BUILD_INFO = ROOT / "src" / "eaal_platform" / "_build_info.py"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 ICON_PNG = ROOT / "src" / "eaal_platform" / "assets" / "icon.png"
@@ -70,27 +73,61 @@ def build_icon() -> None:
             image.save(BUILD / "icon.ico", sizes=[(s, s) for s in (16, 32, 48, 64, 128, 256)])
 
 
+_SMOKE_SCRIPT = """
+import io, json, numpy as np
+from openpyxl import Workbook
+from eaal_platform.ai import cloud_providers
+from eaal_platform.db import approval_import, approvals, resources
+from eaal_platform.server import admin, app as server_app, host
+from eaal_platform.client.api import ClientApi
+
+book = Workbook(); sheet = book.active
+sheet.append(["Name", "Email"]); sheet.append(["Ada", "ada@uni.edu"])
+buffer = io.BytesIO(); book.save(buffer)
+rows = approval_import.read_rows("people.xlsx", buffer.getvalue(), "professor")
+print(json.dumps({
+    "sum": int(np.arange(5).sum()),
+    "excel_rows": len(rows),
+    "providers": sorted(cloud_providers.PROVIDERS),
+    "student_choices": list(cloud_providers.STUDENT_PROVIDER_KEYS),
+}))
+"""
+
+
+def _run_packaged(executable: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603
+        [str(executable), *args], capture_output=True, text=True, timeout=240
+    )
+
+
 def smoke_test(executable: Path) -> None:
-    """Prove the *packaged* app can run student code (it re-launches itself to do so)."""
+    """Prove the *packaged* app is the current code and can do what the app promises.
+
+    It re-launches itself to run a script (that is how student code runs), and
+    that script imports the newest parts: Excel reading, the four AI providers,
+    the approved-email rules and the server. If any is missing from the bundle
+    the build fails here instead of shipping a stale installer.
+    """
+    version = _run_packaged(executable, "--cavy-version")
+    if version.returncode != 0 or "CAVY" not in version.stdout:
+        raise SystemExit(f"Version check FAILED.\n{version.stdout}\n{version.stderr}")
+    print(f"Packaged app reports: {version.stdout.strip()}")
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "main.py"
-        script.write_text(
-            "import random, json, collections, numpy as np\n"
-            "print(json.dumps({'sum': int(np.arange(5).sum()), 'ok': True}))\n",
-            encoding="utf-8",
-        )
-        done = subprocess.run(  # nosec B603
-            [str(executable), "--cavy-run-script", str(script)],
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    if done.returncode != 0 or '"sum": 10' not in done.stdout:
+        script.write_text(_SMOKE_SCRIPT, encoding="utf-8")
+        done = _run_packaged(executable, "--cavy-run-script", str(script))
+    expected = (
+        '"sum": 10',
+        '"excel_rows": 1',
+        '"student_choices": ["gemini", "anthropic", "openai", "xai"]',
+    )
+    if done.returncode != 0 or not all(part in done.stdout for part in expected):
         raise SystemExit(
             f"Smoke test FAILED (exit {done.returncode}).\n"
             f"stdout: {done.stdout}\nstderr: {done.stderr}"
         )
-    print("Smoke test passed: the packaged app runs student code with numpy.")
+    print("Smoke test passed: the packaged app runs student code and has Excel import,")
+    print("the four AI providers, approved-email rules and the server.")
 
 
 def make_dmg_background(destination: Path) -> None:
@@ -251,8 +288,28 @@ def main() -> int:
     return 0
 
 
+def write_build_info() -> str:
+    """Stamp the build with the commit it came from (shown by ``CAVY --cavy-version``)."""
+    commit = os.environ.get("GITHUB_SHA", "")[:7]
+    if not commit:
+        try:
+            commit = subprocess.run(  # nosec B603, B607
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            commit = "unknown"
+    built = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    BUILD_INFO.write_text(f'COMMIT = "{commit}"\nBUILT_AT = "{built}"\n', encoding="utf-8")
+    return commit
+
+
 def _freeze() -> None:
     """Turn the app into a self-contained folder / .app with PyInstaller."""
+    write_build_info()
     run(
         [
             sys.executable,

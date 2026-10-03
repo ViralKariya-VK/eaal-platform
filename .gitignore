@@ -37,3 +37,4 @@ groq.txt
 # Local build leftovers (installers and logs live in GitHub Releases, not in Git)
 build-*.log
 windows_logs/
+src/eaal_platform/_build_info.py

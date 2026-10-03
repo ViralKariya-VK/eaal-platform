@@ -32,3 +32,18 @@ def test_existing_streams_are_left_alone(monkeypatch: pytest.MonkeyPatch) -> Non
     before = (sys.stdout, sys.stderr)
     launcher._ensure_std_streams()
     assert (sys.stdout, sys.stderr) == before
+
+
+def test_the_version_flag_reports_the_build(capsys: pytest.CaptureFixture[str]) -> None:
+    from eaal_platform import buildinfo
+
+    assert launcher.main.__module__ == "eaal_platform.launcher"
+    old = sys.argv
+    sys.argv = ["CAVY", launcher.VERSION_FLAG]
+    try:
+        assert launcher.main() == 0
+    finally:
+        sys.argv = old
+    out = capsys.readouterr().out.strip()
+    assert out == buildinfo.describe()
+    assert out.startswith("CAVY 0.1.0 (commit ")

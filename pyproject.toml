@@ -101,8 +101,9 @@ strict = false
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-# pyobjc's macOS-only frameworks and openpyxl ship no py.typed marker or stubs.
-module = ["AppKit", "Foundation", "openpyxl", "openpyxl.*"]
+# pyobjc's macOS-only frameworks and openpyxl ship no py.typed marker or stubs;
+# _build_info is written by the installer build and doesn't exist otherwise.
+module = ["AppKit", "Foundation", "openpyxl", "openpyxl.*", "eaal_platform._build_info"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

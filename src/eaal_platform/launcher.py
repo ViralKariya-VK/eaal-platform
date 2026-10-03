@@ -4,7 +4,8 @@ A packaged CAVY has no separate Python to run student code with: its own
 executable *is* the interpreter. So the sandbox starts a second copy of the
 app with ``--cavy-run-script <file>``, which lands here, runs that one file
 exactly as ``python <file>`` would, and exits, without ever loading the
-window code. ``--cavy-serve`` runs the classroom server without a window.
+window code. ``--cavy-serve`` runs the classroom server without a window;
+``--cavy-version`` prints which build this is.
 Everything else starts the normal app.
 """
 
@@ -17,6 +18,7 @@ import traceback
 
 RUN_SCRIPT_FLAG = "--cavy-run-script"
 SERVE_FLAG = "--cavy-serve"
+VERSION_FLAG = "--cavy-version"
 
 
 def run_student_script(path: str) -> int:
@@ -56,6 +58,11 @@ def _ensure_std_streams() -> None:
 
 def main() -> int:
     _ensure_std_streams()
+    if len(sys.argv) >= 2 and sys.argv[1] == VERSION_FLAG:
+        from eaal_platform.buildinfo import describe
+
+        print(describe())
+        return 0
     if len(sys.argv) >= 3 and sys.argv[1] == RUN_SCRIPT_FLAG:
         return run_student_script(sys.argv[2])
     if len(sys.argv) >= 2 and sys.argv[1] == SERVE_FLAG:
