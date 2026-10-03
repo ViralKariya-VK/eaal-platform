@@ -1,0 +1,10 @@
+# One line-ending style in the repository, whatever computer a file was edited on
+# (a Windows editor had turned a whole file into CRLF, hiding a 10-line change).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.icns binary
+*.ico binary
+*.ttf binary
+*.pdf binary

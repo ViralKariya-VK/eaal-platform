@@ -42,7 +42,20 @@ def run_student_script(path: str) -> int:
     return 0
 
 
+def _ensure_std_streams() -> None:
+    """A windowed (no-console) build starts with ``sys.stdout``/``sys.stderr`` as None.
+
+    uvicorn's logging setup calls ``sys.stderr.isatty()``, which then crashes, so
+    the server never starts. Point missing streams at the null device instead.
+    """
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+
+
 def main() -> int:
+    _ensure_std_streams()
     if len(sys.argv) >= 3 and sys.argv[1] == RUN_SCRIPT_FLAG:
         return run_student_script(sys.argv[2])
     if len(sys.argv) >= 2 and sys.argv[1] == SERVE_FLAG:

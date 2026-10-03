@@ -33,3 +33,7 @@ node_modules/
 
 # Local API keys — never commit
 groq.txt
+
+# Local build leftovers (installers and logs live in GitHub Releases, not in Git)
+build-*.log
+windows_logs/
