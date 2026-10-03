@@ -22,6 +22,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from eaal_platform.ai import cloud_providers
+from eaal_platform.ai.provider import AIProvider, GenerationContext, Purpose
 from eaal_platform.api.bridge import CavyApi, save_text_file
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
 from eaal_platform.client.settings import load_server_url, normalise_url, save_server_url
@@ -37,7 +41,18 @@ from eaal_platform.server.host import (
 
 _ENTRY_FILENAME = "main.py"
 # Implemented by hand below (or on the backend), not forwarded generically.
-_HANDLED_HERE = frozenset({"run_code", "export_lab_report", "login", "logout", "create_account"})
+_HANDLED_HERE = frozenset(
+    {
+        "run_code",
+        "export_lab_report",
+        "login",
+        "logout",
+        "create_account",
+        "get_ai_settings",
+        "set_ai_provider",
+        "send_ai_message",
+    }
+)
 
 
 class ClientApi:
@@ -48,8 +63,14 @@ class ClientApi:
         local_api: CavyApi,
         save_file_dialog: Callable[[str], str | None] | None = None,
         server_url: str | None = None,
+        ai_http: httpx.Client | None = None,
     ) -> None:
         self._local = local_api
+        # A student's own AI (provider, model and key). It lives only here, in this
+        # computer's memory, never reaches the server, and is dropped on sign-out.
+        self._personal: AIProvider | None = None
+        self._role: str | None = None
+        self._ai_http = ai_http  # tests stand in for the AI companies; None = the internet
         self._backend: CavyApi | RemoteBackend = local_api
         self._save_file_dialog = save_file_dialog
         self._server_url: str | None = None
@@ -72,6 +93,8 @@ class ClientApi:
 
     def set_server(self, url: str) -> dict[str, Any]:
         """Connect to a server, or (blank address) go back to this computer's own data."""
+        self._personal = None
+        self._role = None
         if self._backend is not self._local:
             self._backend.logout()
         else:
@@ -98,6 +121,105 @@ class ClientApi:
         if self._server_url is None or not isinstance(self._backend, RemoteBackend):
             return {"versions": {}, "live": False}
         return {**self._backend.updates(versions, wait), "live": True}
+
+    # -- the AI assistant: a student's own provider and key ---------------------------------
+
+    def _uses_personal_ai(self) -> bool:
+        """On a server, each student connects their own AI; everyone else sets the shared one."""
+        return self._server_url is not None and self._role == "student"
+
+    def get_ai_providers(self) -> dict[str, Any]:
+        """The providers to offer in the setup dropdown."""
+        personal = self._uses_personal_ai()
+        keys = (
+            cloud_providers.STUDENT_PROVIDER_KEYS if personal else tuple(cloud_providers.PROVIDERS)
+        )
+        return {
+            "personal": personal,
+            "providers": [
+                {
+                    "key": info.key,
+                    "label": info.label,
+                    "help_url": info.help_url,
+                    "key_hint": info.key_hint,
+                    "needs_key": info.needs_key,
+                }
+                for info in (cloud_providers.PROVIDERS[k] for k in keys)
+            ],
+        }
+
+    def check_ai_key(self, provider: str, api_key: str) -> dict[str, Any]:
+        """Check a key with its provider and list the models it can use.
+
+        The check goes from this computer straight to the provider.
+        """
+        if provider not in cloud_providers.PROVIDERS or provider in ("groq", "ollama"):
+            return {"ok": False, "models": [], "default": None, "error": "Unknown AI provider."}
+        return cloud_providers.check_key(provider, api_key, self._ai_http).as_dict()
+
+    def get_ai_settings(self) -> dict[str, Any]:
+        if self._personal is not None:
+            problem = self._personal.diagnose()
+            return {
+                "provider": self._personal.provider_name,
+                "model": self._personal.model_name,
+                "available": problem is None,
+                "problem": problem,
+                "scope": "personal",
+            }
+        settings: dict[str, Any] = self._backend.get_ai_settings()
+        return {**settings, "scope": "class"}
+
+    def set_ai_provider(self, provider: str, api_key: str = "", model: str = "") -> dict[str, Any]:
+        if not self._uses_personal_ai():
+            result: dict[str, Any] = self._backend.set_ai_provider(provider, api_key, model)
+            return result
+        if provider not in cloud_providers.STUDENT_PROVIDER_KEYS:
+            return {"ok": False, "error": "Choose one of the listed assistants."}
+        check = cloud_providers.check_key(provider, api_key, self._ai_http)
+        if not check.ok:
+            return {"ok": False, "error": check.error}
+        chosen = model.strip() or check.default
+        if chosen not in check.models:
+            return {"ok": False, "error": "That model isn't available to this key."}
+        self._personal = cloud_providers.make_cloud_provider(
+            provider, api_key, chosen, self._ai_http
+        )
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": chosen,
+            "available": True,
+            "problem": None,
+            "scope": "personal",
+        }
+
+    def forget_my_ai_key(self) -> dict[str, Any]:
+        """Drop the student's own AI connection (the class assistant is used again, if any)."""
+        self._personal = None
+        return {"ok": True}
+
+    def send_ai_message(
+        self, session_id: int, message: str, files: dict[str, str]
+    ) -> dict[str, Any]:
+        """Ask the assistant: the student's own if they connected one, else the class's."""
+        personal = self._personal
+        if personal is None:
+            reply: dict[str, Any] = self._backend.send_ai_message(session_id, message, files)
+            return reply
+        prepared = self._backend.prepare_ai_message(session_id, message, files)
+        if not prepared["allowed"]:
+            return {"available": False, "error": prepared["error"]}
+        result = personal.generate(message, GenerationContext(**prepared["context"]), Purpose.CHAT)
+        recorded: dict[str, Any] = self._backend.record_ai_message(
+            session_id,
+            prepared["snapshot_id"],
+            message,
+            {"available": result.available, "text": result.text, "error": result.error},
+            personal.provider_name,
+            personal.model_name,
+        )
+        return recorded
 
     # -- hosting a server from this app --------------------------------------------
 
@@ -148,9 +270,14 @@ class ClientApi:
     # -- calls handled here -------------------------------------------------
 
     def login(self, role: str, email: str, password: str) -> dict[str, Any]:
-        return self._backend.login(role, email, password)
+        self._personal = None  # whoever used this computer before took their key with them
+        result: dict[str, Any] = self._backend.login(role, email, password)
+        self._role = role if result.get("ok") else None
+        return result
 
     def logout(self) -> None:
+        self._personal = None
+        self._role = None
         self._backend.logout()
 
     def create_account(self, *args: Any) -> dict[str, Any]:

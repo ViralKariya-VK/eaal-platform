@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -110,11 +111,13 @@ class ServerState:
         event_logger: EventLogger,
         ai_provider: AIProvider | None = None,
         clock: Callable[[], float] = time.monotonic,
+        ai_http: httpx.Client | None = None,
     ) -> None:
         self.engine = engine
         self.session_factory = session_factory
         self.event_logger = event_logger
         self.ai_holder = ProviderHolder(ai_provider)
+        self.ai_http = ai_http  # tests stand in for the AI companies; None = the real internet
         self._clock = clock
         self._clients: dict[str, _Client] = {}
         self._lock = threading.Lock()
@@ -131,6 +134,7 @@ class ServerState:
             ai_holder=self.ai_holder,
             professors_set_ai=True,
             restrict_signup=True,
+            ai_http=self.ai_http,
         )
 
     def add_client(

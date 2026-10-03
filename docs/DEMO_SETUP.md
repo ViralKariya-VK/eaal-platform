@@ -99,9 +99,25 @@ computers talk to each other.
 4. Click **Open admin panel**. The first time, it asks you to **create the
    administrator account**: do this yourself right away. This account controls
    every user and all data.
-5. In the admin panel, open **AI assistant** and paste a **Groq key** (works
-   from any computer; or use Ollama if it's installed on PC 1). Students can't
-   change the AI; this one assistant serves the whole class.
+5. **Approve who may sign up** (new, important). In the admin panel open
+   **Approved emails**. Nobody can create an account until their email is on
+   the list for their role:
+   - **Teachers tab:** add each teacher's email (and name). Teachers can only be
+     created this way. Use **Add one**, or **Import CSV / Excel** to add many.
+   - **Students tab:** add the university emails your students will use (with
+     their enrolment numbers if you have them), one by one or by file.
+   - A file needs a header row: `name,email` for teachers, `name,email,enrollment_no`
+     for students. **Download template** gives an example. Extra columns are
+     ignored, and Excel (`.xlsx`) works as well as CSV. After an import you get a
+     report of what was added and which rows were skipped, and why.
+   - Each entry shows *Waiting to sign up* until the person registers, then
+     *Registered*. You can edit or remove waiting entries; edit registered
+     people on the **Users** page, where you can also add, edit, disable or
+     delete any account directly.
+6. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
+   (OpenAI, Claude, Gemini, Grok, Groq or Ollama), paste a key, press **Check key**,
+   choose a model, **Connect**. It is used to score sessions and for chat by
+   students who haven't connected their own.
 
 **Leave CAVY open on PC 1.** Closing it stops the server for everyone. (You can
 still use PC 1's login screen to sign in as someone, if you like.)
@@ -118,12 +134,21 @@ On each: install, open **CAVY**, and on the login screen click
 press **Connect**. The login screen now says *Connected to …*. It remembers
 this.
 
-- **PC 2:** *Create an account* → **Teacher**. (e.g. `prof@demo.edu`)
-- **PC 3:** *Create an account* → **Student** (`student1@demo.edu`).
-- **PC 4:** *Create an account* → **Student** (`student2@demo.edu`).
+- **PC 2:** *Create an account* → **Teacher**, using an email the admin approved.
+- **PC 3 and PC 4:** *Create an account* → **Student**, using approved student emails.
 
-Passwords need 8+ characters. Accounts can also be created by the admin
-(admin panel → Users → Add account).
+Sign-up is refused with a clear message for any email that isn't on the
+approved list, and a student's email can't be used to make a teacher account.
+Passwords need 8+ characters. The admin can also create accounts directly
+(admin panel → Users → Add account), which doesn't need an approved email.
+
+**Each student connects their own AI assistant (optional).** In **Profile** (or
+the *Connect an AI assistant* dialog that appears after sign-in when the class
+assistant isn't available), the student picks **Gemini, Claude, OpenAI or
+Grok**, pastes their API key, presses **Check key** (the provider says which
+models that key can use), chooses a model and presses **Connect**. The key stays
+on that computer, is never sent to the server, and is forgotten when the student
+signs out. Students without a key use the class assistant, if one is set.
 
 If the server is unreachable you'll see "Can't reach the CAVY server…". The
 app deliberately does **not** fall back to local data while a server is
@@ -176,6 +201,7 @@ configured, so student work can't get stranded on one PC.
 | **Disable / enable** an account (keeps history) | Users → Disable |
 | Delete an account (not if a student has work) | Users → Delete |
 | Create accounts | Users → Add account |
+| **Approve emails that may sign up** (teachers, students), one by one or from CSV/Excel | Approved emails |
 | Which tests (labs) are running, who's working | Overview; Labs (working / submitted counts) |
 | One student's whole session | Open on any session |
 | Every action on the system | Audit log |
@@ -183,7 +209,7 @@ configured, so student work can't get stranded on one PC.
 | **Assign a student to a teacher** / move them | Users → Teacher |
 | See / delete shared resources | Resources |
 | Archive or restore a lab | Labs |
-| Set the AI assistant | AI assistant |
+| Set the class AI assistant (OpenAI / Claude / Gemini / Grok / Groq / Ollama) | AI assistant |
 | Copy of everything | Backup |
 
 Changing someone's email or password, disabling or deleting them, or
@@ -227,11 +253,17 @@ resetting their password signs them out immediately.
   has to be built by GitHub and tried on your laptop. Expect small issues.
 - **No encryption (HTTP).** Fine on a private classroom network; don't expose
   the server to the internet.
-- **Open sign-up.** Anyone who can reach the server can create a student or
-  teacher account. The admin can disable or delete them.
+- **No email verification.** Sign-up is limited to approved emails, but the app
+  can't confirm that the person typing an approved email owns it. On a
+  classroom network that is usually fine; someone who knows a classmate's
+  approved email could register first. The admin can reset or delete such an account.
 - **One server computer = one point of failure.** If PC 1 sleeps, closes CAVY, or
   loses the network, nobody can work.
-- **The AI is shared.** A free Groq key has rate limits that every student shares.
+- **AI keys and costs.** A student's own key is used from their computer, so
+  any usage or cost is on that key. The class assistant's key lives in the
+  server's memory and must be re-entered if the server restarts. A student's
+  chat answers are reported to the server by their own app, so a determined
+  student could alter their own record of an AI answer.
 - **Labs are not class-scoped yet.** Every student sees every lab; only resources
   are restricted to a teacher's class.
 - **Shared files are limited to 15 MB** and open in the computer's own program

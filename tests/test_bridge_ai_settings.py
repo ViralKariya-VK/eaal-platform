@@ -118,4 +118,4 @@ def test_groq_key_is_never_returned_to_the_frontend(api: CavyApi) -> None:
 
 def test_unknown_provider_raises(api: CavyApi) -> None:
     with pytest.raises(ValueError, match="Unknown AI provider"):
-        api.set_ai_provider("openai")
+        api.set_ai_provider("not-a-provider")

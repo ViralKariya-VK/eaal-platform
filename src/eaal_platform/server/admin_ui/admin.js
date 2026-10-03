@@ -896,42 +896,78 @@ function showAudit() {
 
 function showAi() {
   return guarded(async () => {
-    const ai = await get("/ai");
+    const [ai, providers] = await Promise.all([get("/ai"), get("/ai/providers")]);
+    const hasModelList = (key) => key !== "groq" && key !== "ollama";
     main().innerHTML = `
       <div class="page-head"><div><h1>AI assistant</h1>
-      <p class="muted">One assistant serves every student and professor. Professors can change it too.</p></div></div>
+      <p class="muted">The class assistant: used to score sessions, and for chat by any student who hasn't connected their own. Students can connect their own key (Gemini, Claude, OpenAI or Grok) in the app; that stays on their computer.</p></div></div>
       <div class="card">
         <p>${ai.available ? '<span class="pill ok">Ready</span>' : '<span class="pill bad">Not available</span>'}
           Using <strong>${esc(ai.provider || "none")}</strong> ${ai.model ? "· " + esc(ai.model) : ""}</p>
         ${ai.problem ? `<p class="muted">${esc(ai.problem)}</p>` : ""}
-        <label>Backend
-          <select id="aiProvider">
-            <option value="groq">Groq (online; needs an API key)</option>
-            <option value="ollama">Ollama (runs on this server computer)</option>
-          </select></label>
-        <label id="keyField">Groq API key <input id="aiKey" type="password" placeholder="gsk_…" autocomplete="off" /></label>
+        <label>Assistant
+          <select id="aiProvider">${providers.map((p) => `<option value="${p.key}">${esc(p.label)}</option>`).join("")}</select></label>
+        <div id="keyBlock">
+          <label>API key <input id="aiKey" type="password" autocomplete="off" /></label>
+          <p class="muted" id="aiHelp" style="margin:6px 0 0"></p>
+          <button id="aiCheck" style="margin-top:8px">Check key</button>
+        </div>
+        <label id="modelBlock" style="display:none">Model <select id="aiModel"></select></label>
         <p class="muted">The key is kept in the server's memory only and is never written to the database. Restarting the server clears it.</p>
         <p class="error" id="aiError"></p>
-        <button class="primary" id="aiSave">Save and test</button>
+        <button class="primary" id="aiSave" disabled>Connect</button>
       </div>`;
     const provider = document.getElementById("aiProvider");
-    provider.value = ai.provider === "ollama" ? "ollama" : "groq";
-    const sync = () => (document.getElementById("keyField").style.display = provider.value === "groq" ? "" : "none");
+    provider.value = providers.some((p) => p.key === ai.provider) ? ai.provider : providers[0].key;
+    const cur = () => providers.find((p) => p.key === provider.value);
+    const reset = () => {
+      document.getElementById("modelBlock").style.display = "none";
+      document.getElementById("aiError").textContent = "";
+      const k = cur().key;
+      document.getElementById("aiSave").disabled = !(k === "ollama" || (k === "groq" && document.getElementById("aiKey").value.trim()));
+    };
+    const sync = () => {
+      const p = cur();
+      document.getElementById("keyBlock").style.display = p.needs_key ? "" : "none";
+      document.getElementById("aiCheck").style.display = hasModelList(p.key) ? "" : "none";
+      document.getElementById("aiKey").placeholder = p.key_hint;
+      document.getElementById("aiKey").value = "";
+      document.getElementById("aiHelp").innerHTML = p.needs_key ? `Get a key at <a href="${esc(p.help_url)}" target="_blank" rel="noopener">${esc(p.help_url.replace("https://", ""))}</a>` : "Needs Ollama installed and running on the server computer.";
+      reset();
+    };
     provider.addEventListener("change", sync);
-    sync();
+    document.getElementById("aiKey").addEventListener("input", reset);
+    document.getElementById("aiCheck").addEventListener("click", async () => {
+      const button = document.getElementById("aiCheck");
+      button.disabled = true;
+      button.textContent = "Checking…";
+      try {
+        const r = await post("/ai/check", { provider: provider.value, api_key: document.getElementById("aiKey").value });
+        if (!r.ok) { document.getElementById("aiError").textContent = r.error; return; }
+        document.getElementById("aiError").textContent = "";
+        document.getElementById("aiModel").innerHTML = r.models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+        document.getElementById("modelBlock").style.display = "";
+        document.getElementById("aiSave").disabled = false;
+        toast("Key accepted. Choose a model, then Connect.");
+      } catch (err) {
+        document.getElementById("aiError").textContent = err.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Check key";
+      }
+    });
     document.getElementById("aiSave").addEventListener("click", async () => {
       try {
-        const result = await post("/ai", { provider: provider.value, api_key: document.getElementById("aiKey").value });
-        if (!result.ok) {
-          document.getElementById("aiError").textContent = result.error || "That didn't work.";
-          return;
-        }
+        const k = cur().key;
+        const result = await post("/ai", { provider: k, api_key: document.getElementById("aiKey").value, model: hasModelList(k) ? document.getElementById("aiModel").value : "" });
+        if (!result.ok) { document.getElementById("aiError").textContent = result.error || "That didn't work."; return; }
         toast("AI assistant updated.");
         showAi();
       } catch (err) {
         document.getElementById("aiError").textContent = err.message;
       }
     });
+    sync();
   });
 }
 

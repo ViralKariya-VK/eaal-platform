@@ -1008,18 +1008,8 @@ function showProfile() {
     <div class="card" style="max-width:420px; margin-top:16px;">
       <h3 style="margin-top:0;">AI Assistant</h3>
       <p class="muted" id="aiStatusLine" style="margin:6px 0 14px;">Checking the assistant&hellip;</p>
-      <div class="role-toggle" id="aiProviderToggle">
-        <button data-provider="ollama">Local (Ollama)</button>
-        <button data-provider="groq">Groq (online)</button>
-      </div>
-      <div class="auth-form">
-        <label id="groqKeyField" style="display:none;">Groq API key
-          <input type="password" id="groqKeyInput" placeholder="gsk_..." autocomplete="off" />
-        </label>
-        <p class="muted" id="aiProviderHint"></p>
-        <p class="auth-error" id="aiSettingsError"></p>
-        <button class="primary" id="aiSaveButton">Save &amp; Test</button>
-      </div>
+      <div id="aiConnectHost"></div>
+      <button class="ghost" id="aiForgetButton" style="margin-top:12px; display:none;">Remove my key from this computer</button>
     </div>`,
         "profile"
       );
@@ -1078,177 +1068,194 @@ function setUpPasswordChange() {
 
 let aiSetupPromptShown = false;
 
+// -- Connecting an AI assistant ----------------------------------------------------
+//
+// One form, used in the setup dialog and on Profile: pick a provider, paste a key,
+// check it (the provider says which models that key can use), pick a model, connect.
+// A student's key stays on their own computer; it is used from here and forgotten
+// when they sign out.
+
 function maybePromptAiSetup() {
-  // On a server the assistant is shared by the whole class; only a teacher sets it up.
-  if (aiSetupPromptShown || (serverMode && currentRole !== "professor")) return;
+  if (aiSetupPromptShown) return;
   aiSetupPromptShown = true;
   api()
     .get_ai_settings()
     .then((settings) => {
+      // Offer setup only when there is no working assistant at all.
       if (!settings.available) showAiSetupModal(settings);
     });
 }
 
+function describeAi(settings) {
+  if (!settings || !settings.provider) return "No assistant is connected.";
+  const who =
+    settings.scope === "personal"
+      ? "your own key"
+      : serverMode
+        ? "the class assistant"
+        : "this app";
+  const what = `${settings.provider}${settings.model ? " · " + settings.model : ""}`;
+  return settings.available
+    ? `Using ${what} (${who}). Ready.`
+    : `${what} (${who}) isn't available: ${settings.problem || "not reachable right now."}`;
+}
+
+async function renderAiConnect(container, onConnected) {
+  const info = await api().get_ai_providers();
+  const providers = info.providers;
+  const noteFor = () =>
+    info.personal
+      ? "Your key stays on this computer. It is used only from here, is never sent to the server, and is forgotten when you sign out."
+      : serverMode
+        ? "This assistant is shared by the whole class and is also used to score sessions. The key is kept in the server's memory only."
+        : "The key is kept in memory only, until you close CAVY.";
+  container.innerHTML = `
+    <label class="modal-field">Assistant
+      <select id="aiProvider">${providers
+        .map((p) => `<option value="${p.key}">${escapeHtml(p.label)}</option>`)
+        .join("")}</select>
+    </label>
+    <div id="aiKeyBlock">
+      <label class="modal-field">API key
+        <input type="password" id="aiKey" autocomplete="off" />
+      </label>
+      <p class="muted" id="aiHelp" style="margin:6px 0 0;"></p>
+      <button class="ghost" id="aiCheck" style="margin-top:8px;">Check key</button>
+    </div>
+    <div id="aiOllama" style="display:none;">
+      <p class="muted">Runs on this computer. Needs Ollama installed and running, with a model pulled
+      (<code>ollama pull qwen3:8b</code>).</p>
+    </div>
+    <label class="modal-field" id="aiModelBlock" style="display:none;">Model
+      <select id="aiModel"></select>
+    </label>
+    <p class="muted" id="aiNote" style="margin-top:10px;">${escapeHtml(noteFor())}</p>
+    <p class="auth-error" id="aiErr"></p>
+    <button class="primary" id="aiConnect" disabled>Connect</button>`;
+
+  const $ = (id) => container.querySelector(`#${id}`);
+  const current = () => providers.find((p) => p.key === $("aiProvider").value);
+  const hasModelList = (p) => p.key !== "groq" && p.key !== "ollama";
+  const reset = () => {
+    $("aiModelBlock").style.display = "none";
+    $("aiModel").innerHTML = "";
+    $("aiErr").textContent = "";
+    const p = current();
+    $("aiConnect").disabled = !(p.key === "ollama" || (p.key === "groq" && $("aiKey").value.trim()));
+  };
+  const showProvider = () => {
+    const p = current();
+    $("aiKeyBlock").style.display = p.needs_key ? "" : "none";
+    $("aiOllama").style.display = p.needs_key ? "none" : "";
+    $("aiCheck").style.display = hasModelList(p) ? "" : "none";
+    $("aiKey").placeholder = p.key_hint;
+    $("aiKey").value = "";
+    $("aiHelp").innerHTML = p.needs_key
+      ? `Get a key at <button class="auth-link" id="aiHelpLink">${escapeHtml(p.help_url.replace("https://", ""))}</button>`
+      : "";
+    const link = $("aiHelpLink");
+    if (link) link.addEventListener("click", () => api().open_link(p.help_url));
+    $("aiConnect").textContent = p.key === "ollama" ? "Check & connect" : "Connect";
+    reset();
+  };
+  $("aiProvider").addEventListener("change", showProvider);
+  $("aiKey").addEventListener("input", reset); // a changed key must be checked again
+
+  $("aiCheck").addEventListener("click", () => {
+    const p = current();
+    const button = $("aiCheck");
+    $("aiErr").textContent = "";
+    button.disabled = true;
+    button.textContent = "Checking…";
+    api()
+      .check_ai_key(p.key, $("aiKey").value)
+      .then((result) => {
+        if (!result.ok) {
+          $("aiErr").textContent = result.error;
+          return;
+        }
+        $("aiModel").innerHTML = result.models
+          .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+          .join("");
+        $("aiModelBlock").style.display = "";
+        $("aiConnect").disabled = false;
+        showToast("Key accepted. Choose a model, then Connect.");
+      })
+      .catch((err) => ($("aiErr").textContent = errorText(err)))
+      .finally(() => {
+        button.disabled = false;
+        button.textContent = "Check key";
+      });
+  });
+
+  $("aiConnect").addEventListener("click", () => {
+    const p = current();
+    const button = $("aiConnect");
+    $("aiErr").textContent = "";
+    button.disabled = true;
+    button.textContent = "Connecting…";
+    api()
+      .set_ai_provider(p.key, $("aiKey").value, hasModelList(p) ? $("aiModel").value : "")
+      .then((result) => {
+        if (result.ok === false || result.available === false) {
+          $("aiErr").textContent = result.error || result.problem || "Couldn't connect.";
+          return;
+        }
+        $("aiKey").value = "";
+        showToast("Assistant connected.");
+        onConnected(result);
+      })
+      .catch((err) => ($("aiErr").textContent = errorText(err)))
+      .finally(() => {
+        button.disabled = false;
+        button.textContent = p.key === "ollama" ? "Check & connect" : "Connect";
+        if (!button.isConnected) return;
+        reset();
+      });
+  });
+  showProvider();
+}
+
 function showAiSetupModal(settings, onConnected = () => {}) {
   document.querySelectorAll(".ai-setup-overlay").forEach((el) => el.remove());
-  const ollamaModel = settings.provider === "ollama" && settings.model ? settings.model : "qwen3:8b";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay ai-setup-overlay";
   overlay.innerHTML = `
     <div class="modal-card">
-      <h2>Set up the AI assistant</h2>
-      <p class="muted">${escapeHtml(settings.problem || "The assistant isn't available right now.")}</p>
-      <div class="role-toggle" id="setupTabs" style="margin-top:14px;">
-        <button class="active" data-tab="groq">Groq (online)</button>
-        <button data-tab="ollama">Ollama (this computer)</button>
-      </div>
-      <div id="setupGroq">
-        <label>Groq API key
-          <input type="password" id="setupGroqKey" placeholder="gsk_..." autocomplete="off" />
-        </label>
-        <p class="muted" style="margin-top:8px;">Runs on Groq's servers, so it works on any computer. Free keys at console.groq.com. The key is kept only until you close CAVY.</p>
-      </div>
-      <div id="setupOllama" style="display:none;">
-        <ol class="setup-steps">
-          <li>Install Ollama from ollama.com.</li>
-          <li>Download the model: <code>ollama pull ${escapeHtml(ollamaModel)}</code></li>
-          <li>Leave Ollama running, then press <b>Check again</b>.</li>
-        </ol>
-        <p class="muted">Runs on this computer. It needs a fairly powerful machine and several GB of disk space.</p>
-      </div>
-      <p class="auth-error" id="setupError" style="margin-top:10px;"></p>
-      <div class="modal-actions">
-        <button class="ghost" id="setupSkip">Not now</button>
-        <button class="primary" id="setupAction">Connect</button>
-      </div>
+      <h2>Connect an AI assistant</h2>
+      <p class="muted">${escapeHtml(settings.problem || "No assistant is connected yet.")}</p>
+      <div id="aiConnectHost" style="margin-top:12px;"></div>
+      <div class="modal-actions"><button class="ghost" id="setupLater">Not now</button></div>
     </div>`;
   document.body.appendChild(overlay);
-
-  let tab = "groq";
-  const errorEl = overlay.querySelector("#setupError");
-  const action = overlay.querySelector("#setupAction");
-  const selectTab = (next) => {
-    tab = next;
-    overlay.querySelectorAll("#setupTabs button").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.tab === next);
-    });
-    overlay.querySelector("#setupGroq").style.display = next === "groq" ? "" : "none";
-    overlay.querySelector("#setupOllama").style.display = next === "ollama" ? "" : "none";
-    action.textContent = next === "groq" ? "Connect" : "Check again";
-    errorEl.textContent = "";
-  };
-  overlay.querySelectorAll("#setupTabs button").forEach((btn) => {
-    btn.addEventListener("click", () => selectTab(btn.dataset.tab));
-  });
-  overlay.querySelector("#setupSkip").addEventListener("click", () => overlay.remove());
-
-  action.addEventListener("click", () => {
-    const key = overlay.querySelector("#setupGroqKey").value;
-    if (tab === "groq" && !key.trim()) {
-      errorEl.textContent = "Enter a Groq API key.";
-      return;
-    }
-    const idle = action.textContent;
-    action.disabled = true;
-    action.textContent = tab === "groq" ? "Testing…" : "Checking…";
-    errorEl.textContent = "";
-    api()
-      .set_ai_provider(tab, tab === "groq" ? key : "")
-      .then((result) => {
-        if (result.ok && result.available) {
-          overlay.remove();
-          showToast(tab === "groq" ? "Connected to Groq." : "Ollama is ready.");
-          onConnected();
-        } else {
-          errorEl.textContent = result.problem || result.error || "Couldn't connect.";
-        }
-      })
-      .finally(() => {
-        action.disabled = false;
-        action.textContent = idle;
-      });
+  overlay.querySelector("#setupLater").addEventListener("click", () => overlay.remove());
+  renderAiConnect(overlay.querySelector("#aiConnectHost"), () => {
+    overlay.remove();
+    onConnected();
   });
 }
 
-const AI_PROVIDER_LABELS = { ollama: "Local (Ollama)", groq: "Groq (online)" };
-const AI_PROVIDER_HINTS = {
-  ollama: "Runs on this computer. Needs Ollama installed and running, with a model pulled.",
-  groq: "Runs on Groq's servers. Free keys at console.groq.com. The key is kept only until you close CAVY.",
-};
-
 function setUpAiSettings() {
-  if (serverMode && currentRole !== "professor") {
-    // Shared assistant: students see its status but can't change it.
-    document.getElementById("aiProviderToggle").style.display = "none";
-    document.querySelector("#aiSaveButton").closest(".auth-form").style.display = "none";
+  const statusLine = document.getElementById("aiStatusLine");
+  const host = document.getElementById("aiConnectHost");
+  const forget = document.getElementById("aiForgetButton");
+  const refresh = () =>
     api()
       .get_ai_settings()
       .then((settings) => {
-        document.getElementById("aiStatusLine").textContent = settings.available
-          ? "The class assistant is ready."
-          : `The class assistant isn't available. ${settings.problem || ""} Ask your teacher.`;
+        statusLine.textContent = describeAi(settings);
+        forget.style.display = settings.scope === "personal" ? "" : "none";
       });
-    return;
-  }
-  let selected = "ollama";
-  const statusLine = document.getElementById("aiStatusLine");
-  const errorEl = document.getElementById("aiSettingsError");
-  const saveButton = document.getElementById("aiSaveButton");
-
-  function describe(settings) {
-    const label = AI_PROVIDER_LABELS[settings.provider];
-    if (!label) return "No assistant is configured.";
-    return settings.available
-      ? `Using ${label}${settings.model ? ` · ${settings.model}` : ""} — ready.`
-      : `Using ${label} — ${settings.problem || "not reachable right now."}`;
-  }
-
-  function select(provider) {
-    selected = provider;
-    document.querySelectorAll("#aiProviderToggle button").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.provider === provider);
-    });
-    document.getElementById("groqKeyField").style.display = provider === "groq" ? "" : "none";
-    document.getElementById("aiProviderHint").textContent = AI_PROVIDER_HINTS[provider];
-    errorEl.textContent = "";
-  }
-
-  document.querySelectorAll("#aiProviderToggle button").forEach((btn) => {
-    btn.addEventListener("click", () => select(btn.dataset.provider));
-  });
-
-  select(selected);
-  api()
-    .get_ai_settings()
-    .then((settings) => {
-      statusLine.textContent = describe(settings);
-      if (AI_PROVIDER_LABELS[settings.provider]) select(settings.provider);
-    });
-
-  saveButton.addEventListener("click", () => {
-    const key = document.getElementById("groqKeyInput").value;
-    if (selected === "groq" && !key.trim()) {
-      errorEl.textContent = "Enter a Groq API key.";
-      return;
-    }
-    errorEl.textContent = "";
-    saveButton.disabled = true;
-    saveButton.textContent = "Testing…";
+  forget.addEventListener("click", () =>
     api()
-      .set_ai_provider(selected, key)
-      .then((result) => {
-        if (result.ok) {
-          statusLine.textContent = describe(result);
-          document.getElementById("groqKeyInput").value = "";
-        } else {
-          errorEl.textContent = result.error || "Couldn't switch the assistant.";
-        }
+      .forget_my_ai_key()
+      .then(() => {
+        showToast("Your key was removed from this computer.");
+        refresh();
       })
-      .finally(() => {
-        saveButton.disabled = false;
-        saveButton.textContent = "Save & Test";
-      });
-  });
+  );
+  renderAiConnect(host, () => refresh());
+  refresh();
 }
 
 // -- Professor: dashboard -------------------------------------------------------
@@ -2521,14 +2528,10 @@ function renderChatPanel(container, info, getFiles) {
         const el = document.getElementById("chatStatus");
         if (!el) return;
         if (settings.available) {
-          el.textContent = "Assistant ready";
+          el.textContent = settings.scope === "personal" ? "Assistant ready (your key)" : "Assistant ready";
           return;
         }
-        if (serverMode && currentRole !== "professor") {
-          el.textContent = "Assistant not available — ask your teacher to set it up.";
-          return;
-        }
-        el.innerHTML = `Assistant not available — <button class="auth-link" id="chatSetupLink">Set up</button>`;
+        el.innerHTML = `Assistant not available — <button class="auth-link" id="chatSetupLink">Connect one</button>`;
         document.getElementById("chatSetupLink").addEventListener("click", () => {
           showAiSetupModal(settings, refreshChatStatus);
         });

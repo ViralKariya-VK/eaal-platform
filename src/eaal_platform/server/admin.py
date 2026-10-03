@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, Table, cast, func, or_, select
 from sqlalchemy.engine import Row
 
+from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
 from eaal_platform.db import approval_import, approvals
@@ -214,6 +215,12 @@ class CreateUserRequest(BaseModel):
 class AiRequest(BaseModel):
     provider: str
     api_key: str = ""
+    model: str = ""
+
+
+class AiCheckRequest(BaseModel):
+    provider: str
+    api_key: str
 
 
 def _jsonable(value: Any) -> Any:
@@ -1078,18 +1085,54 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
 
     # -- AI backend & backup ----------------------------------------------------------------
 
+    def _ai_api() -> CavyApi:
+        return CavyApi(
+            state.session_factory,
+            state.event_logger,
+            ai_holder=state.ai_holder,
+            ai_http=state.ai_http,
+        )
+
     @router.get("/ai")
     def ai_settings(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
-        api = CavyApi(state.session_factory, state.event_logger, ai_holder=state.ai_holder)
-        return api.get_ai_settings()
+        return _ai_api().get_ai_settings()
+
+    @router.get("/ai/providers")
+    def ai_providers(_: _AdminSession = Depends(current_admin)) -> list[dict[str, Any]]:
+        return [
+            {
+                "key": info.key,
+                "label": info.label,
+                "help_url": info.help_url,
+                "key_hint": info.key_hint,
+                "needs_key": info.needs_key,
+            }
+            for info in cloud_providers.PROVIDERS.values()
+        ]
+
+    @router.post("/ai/check")
+    def check_ai_key(
+        request: AiCheckRequest, _: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        """Check a key and list the models it can use (the key is not stored)."""
+        if request.provider not in cloud_providers.PROVIDERS or request.provider in (
+            "groq",
+            "ollama",
+        ):
+            raise HTTPException(status_code=400, detail="Unknown AI provider.")
+        return cloud_providers.check_key(request.provider, request.api_key, state.ai_http).as_dict()
 
     @router.post("/ai")
-    def set_ai(request: AiRequest, _: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
-        api = CavyApi(state.session_factory, state.event_logger, ai_holder=state.ai_holder)
+    def set_ai(request: AiRequest, admin: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
         try:
-            return api.set_ai_provider(request.provider, request.api_key)
+            result = _ai_api().set_ai_provider(request.provider, request.api_key, request.model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if result.get("ok"):
+            audit(
+                admin, "set_ai_assistant", f"{request.provider} {result.get('model') or ''}".strip()
+            )
+        return result
 
     @router.get("/backup")
     def backup(

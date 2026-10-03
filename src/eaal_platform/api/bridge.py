@@ -37,9 +37,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform.ai import cloud_providers
 from eaal_platform.ai.groq_provider import GroqProvider
 from eaal_platform.ai.ollama_provider import OllamaProvider
 from eaal_platform.ai.provider import (
@@ -203,6 +205,7 @@ class CavyApi:
         ai_holder: ProviderHolder | None = None,
         professors_set_ai: bool = False,
         restrict_signup: bool = False,
+        ai_http: httpx.Client | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._event_logger = event_logger
@@ -213,6 +216,8 @@ class CavyApi:
         self._professors_set_ai = professors_set_ai
         # On a server, only emails an administrator has approved may sign up.
         self._restrict_signup = restrict_signup
+        # Lets tests stand in for the AI companies' servers; None means the real internet.
+        self._ai_http = ai_http
         # Opens the OS "Save as" dialog and returns the chosen path (None if
         # cancelled). Injected by app.py because only the window can show it;
         # the webview can't download files itself.
@@ -531,6 +536,14 @@ class CavyApi:
         if self._current_professor_id is None:
             raise ValueError("Not logged in as a professor")
         return self._current_professor_id
+
+    def _require_session_owner(self, session_id: int) -> None:
+        """Students may only add to their own sessions."""
+        student_id = self._require_student_id()
+        with self._session_factory() as db_session:
+            session = db_session.get(SessionModel, session_id)
+            if session is None or session.student_id != student_id:
+                raise ValueError("That session isn't yours.")
 
     def _require_logged_in(self) -> None:
         if self._current_student_id is None and self._current_professor_id is None:
@@ -990,6 +1003,7 @@ class CavyApi:
         reset: bool = False,
         manual: bool = False,
     ) -> dict[str, Any]:
+        self._require_session_owner(session_id)
         # Deliberately not keyword-only: pywebview's JS bridge marshals every
         # call as a flat positional-argument list (it slices `arguments` on
         # the JS side and applies it as `func(*args)` on the Python side —
@@ -1011,6 +1025,7 @@ class CavyApi:
         self, session_id: int, files: dict[str, str], entry_filename: str = _ENTRY_FILENAME
     ) -> dict[str, Any]:
         """Record that code is about to run; the caller then runs it and calls ``record_run``."""
+        self._require_session_owner(session_id)
         if entry_filename not in files:
             entry_filename = _ENTRY_FILENAME
         snapshot_id = self._save_snapshot(session_id, files, active_filename=entry_filename)
@@ -1025,6 +1040,7 @@ class CavyApi:
         outcome: dict[str, Any],
     ) -> dict[str, Any]:
         """Store the result of a run (``outcome`` has stdout, stderr, exit_status, ...)."""
+        self._require_session_owner(session_id)
         stdout = str(outcome.get("stdout", ""))
         stderr = str(outcome.get("stderr", ""))
         duration_ms = int(outcome.get("duration_ms", 0))
@@ -1088,6 +1104,7 @@ class CavyApi:
         )
 
     def submit_session(self, session_id: int, files: dict[str, str]) -> dict[str, Any]:
+        self._require_session_owner(session_id)
         snapshot_id = self._save_snapshot(session_id, files)
         with self._session_factory() as db_session:
             session = db_session.get(SessionModel, session_id)
@@ -1107,6 +1124,7 @@ class CavyApi:
         the student edited their explanation before the final Submit),
         update it in place rather than accumulating duplicates.
         """
+        self._require_session_owner(session_id)
         self._require_student_id()
         with self._session_factory() as db_session:
             existing = (
@@ -1139,11 +1157,11 @@ class CavyApi:
             "problem": problem,
         }
 
-    def set_ai_provider(self, provider: str, api_key: str = "") -> dict[str, Any]:
+    def set_ai_provider(self, provider: str, api_key: str = "", model: str = "") -> dict[str, Any]:
         """Switch the assistant's backend for the rest of this app session.
 
-        A Groq key is accepted only if Groq answers with it, and is held in
-        memory only, never written to the database or disk.
+        A key is accepted only if the provider answers with it, and is held
+        in memory only, never written to the database or disk.
         """
         if self._professors_set_ai:
             self._require_professor_id()
@@ -1160,14 +1178,31 @@ class CavyApi:
                     "ok": False,
                     "error": "Couldn't reach Groq with that key. Check it and try again.",
                 }
+        elif provider in cloud_providers.PROVIDERS and provider not in ("groq", "ollama"):
+            check = cloud_providers.check_key(provider, api_key, self._ai_http)
+            if not check.ok:
+                return {"ok": False, "error": check.error}
+            chosen = model.strip() or check.default
+            if chosen not in check.models:
+                return {"ok": False, "error": "That model isn't available to this key."}
+            candidate = cloud_providers.make_cloud_provider(
+                provider, api_key, chosen, self._ai_http
+            )
         else:
             raise ValueError(f"Unknown AI provider {provider!r}")
         self._ai_provider = candidate
         return {"ok": True, **self.get_ai_settings()}
 
-    def send_ai_message(
+    def prepare_ai_message(
         self, session_id: int, message: str, files: dict[str, str]
     ) -> dict[str, Any]:
+        """First half of asking the assistant: check it's allowed, record the prompt, build context.
+
+        The caller then gets the answer from whichever AI it uses (the class
+        assistant on the server, or the student's own on their computer) and
+        reports it with ``record_ai_message``.
+        """
+        self._require_session_owner(session_id)
         with self._session_factory() as db_session:
             session = db_session.get(SessionModel, session_id)
             if session is None:
@@ -1179,7 +1214,7 @@ class CavyApi:
             # Server-side enforcement, not just a disabled button in the
             # frontend — the frontend already prevents this, but the rule
             # about what's allowed in a given stage belongs here too.
-            return {"available": False, "error": "AI assistance is restricted during this stage."}
+            return {"allowed": False, "error": "AI assistance is restricted during this stage."}
 
         snapshot_id = self._save_snapshot(session_id, files)
         had_recent_error = self._last_execution_had_error(session_id)
@@ -1189,34 +1224,72 @@ class CavyApi:
             code_version_id=snapshot_id,
             payload={"had_recent_error": had_recent_error},
         )
-
         context = self._build_ai_context(session_id, task_description, files)
-        result = self._ai_provider.generate(message, context, Purpose.CHAT)
+        return {
+            "allowed": True,
+            "snapshot_id": snapshot_id,
+            "context": {
+                "task_description": context.task_description,
+                "current_code": context.current_code,
+                "recent_stdout": context.recent_stdout,
+                "recent_stderr": context.recent_stderr,
+            },
+        }
 
-        error = None if result.available else result.error
+    def record_ai_message(
+        self,
+        session_id: int,
+        snapshot_id: int,
+        message: str,
+        result: dict[str, Any],
+        provider: str | None,
+        model: str | None,
+    ) -> dict[str, Any]:
+        """Second half: store the assistant's answer (or why there wasn't one)."""
+        self._require_session_owner(session_id)
+        available = bool(result.get("available"))
+        text = str(result.get("text") or "")
+        error = None if available else str(result.get("error") or "") or None
         self._log_event(
             session_id,
             EventType.AI_RESPONSE,
             code_version_id=snapshot_id,
-            payload={"available": result.available, "error": error},
+            payload={"available": available, "error": error},
         )
-
-        response_or_error = result.text if result.available else (result.error or "")
+        response_or_error = text if available else (error or "")
         with self._session_factory() as db_session:
             db_session.add(
                 AIInteraction(
                     session_id=session_id,
                     prompt=message,
-                    response=response_or_error if result.available else None,
-                    provider=self._ai_provider.provider_name,
-                    model=self._ai_provider.model_name,
+                    response=response_or_error if available else None,
+                    provider=(provider or "")[:50] or None,
+                    model=(model or "")[:100] or None,
                     code_version_before_id=snapshot_id,
                     code_version_after_id=snapshot_id,
                 )
             )
             db_session.commit()
+        return {"available": available, "text": response_or_error}
 
-        return {"available": result.available, "text": response_or_error}
+    def send_ai_message(
+        self, session_id: int, message: str, files: dict[str, str]
+    ) -> dict[str, Any]:
+        """Ask the class (or this app's) assistant."""
+        prepared = self.prepare_ai_message(session_id, message, files)
+        if not prepared["allowed"]:
+            return {"available": False, "error": prepared["error"]}
+        result = self._ai_provider.generate(
+            message, GenerationContext(**prepared["context"]), Purpose.CHAT
+        )
+        return self.record_ai_message(
+            session_id,
+            prepared["snapshot_id"],
+            message,
+            {"available": result.available, "text": result.text, "error": result.error},
+            self._ai_provider.provider_name,
+            self._ai_provider.model_name,
+        )
 
     def _build_ai_context(
         self, session_id: int, task_description: str | None, files: dict[str, str]
@@ -1248,6 +1321,7 @@ class CavyApi:
     # -- results --------------------------------------------------------
 
     def get_submission_summary(self, session_id: int) -> dict[str, Any]:
+        self._require_session_owner(session_id)
         with self._session_factory() as db_session:
             session = db_session.get(SessionModel, session_id)
             submitted_at = (
@@ -1276,6 +1350,7 @@ class CavyApi:
             return {"submitted_at": submitted_at, "exit_status": exit_status, "label": label}
 
     def get_ciq_score(self, session_id: int) -> dict[str, Any]:
+        self._require_session_owner(session_id)
         # Events are written by a background thread; make sure the latest ones
         # are saved before they are counted.
         self._event_logger.flush()

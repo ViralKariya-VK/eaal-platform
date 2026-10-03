@@ -53,10 +53,16 @@ Tick each box as it ships. Sizes are rough estimates.
       the server, so it lists every student on every PC.
 - [x] **A3. Cross-device lab reports** — reports read from the server, so a
       professor sees students from every device.
-- [ ] **A4. Server hardening before any real rollout** — HTTPS, restricting
-      who can create teacher accounts, per-IP login throttling for the app
-      (only admin login is throttled today), server-side audit log, running
-      the server as a service/auto-start.
+- [x] **A4a. Restricted sign-up** — on a server only approved emails can create
+      an account: teachers exist only if an admin adds them; students need an
+      approved university email. Admin "Approved emails" page: add, edit,
+      remove, and bulk import from CSV/Excel with a per-row report. Emails are
+      case-insensitive. Standalone (no server) apps stay open.
+- [ ] **A4b. Remaining hardening before any real rollout** — HTTPS, email
+      verification (approval proves the address is allowed, not that the
+      typist owns it; e.g. an emailed code), per-IP login throttling for the
+      app (only admin login is throttled today), running the server as a
+      service/auto-start.
 - [ ] **A5. Offline tolerance** — if the server is unreachable mid-session
       the student's Run/Submit fail with an error; nothing is queued.
 
@@ -71,6 +77,15 @@ Tick each box as it ships. Sizes are rough estimates.
       "Set up" link. Also fixes a real gap: Ollama running *without the model
       installed* used to be reported as "ready" (then every chat message
       failed); it now says so and shows the `ollama pull` command.
+- [x] **B4. Choose your own AI provider** — students pick Gemini, Claude, OpenAI
+      or Grok, paste a key, check it (the provider lists the models the key
+      can use), choose a model, connect. The key stays on the student's
+      computer (never sent to the server; forgotten on sign-out); chat goes
+      from their computer to the provider and the server records the exchange.
+      Without a key, chat uses the class assistant, which an admin or teacher
+      sets with the same flow (plus Groq and Ollama). Tested against simulated
+      APIs and against the real services' rejection of bad keys; **not yet
+      tried with a valid key of each provider**.
 - [ ] **B3. Remember the Groq key** — the key is kept in memory only, so
       Groq-only users must re-enter it every time they open CAVY. Proper fix
       is opt-in storage in the OS keychain (macOS Keychain / Windows
