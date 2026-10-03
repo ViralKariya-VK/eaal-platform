@@ -119,7 +119,16 @@ function renderMarkdown(rawText) {
   return html;
 }
 
+// Screens that can refresh themselves when the server reports news set this
+// just before calling setScreen(); every other screen (above all the code
+// workspace, which must never be redrawn under someone typing) gets none.
+let nextRefresh = null;
+let currentRefresh = null;
+let pendingScroll = null;
+
 function setScreen(html, activeNav, options) {
+  currentRefresh = nextRefresh;
+  nextRefresh = null;
   if (currentEditor) {
     currentEditor.dispose();
     currentEditor = null;
@@ -129,6 +138,10 @@ function setScreen(html, activeNav, options) {
   workspaceTimerId = null;
   document.getElementById("headerExtra").innerHTML = "";
   app.innerHTML = html;
+  if (pendingScroll !== null) {
+    app.scrollTop = pendingScroll;
+    pendingScroll = null;
+  }
   if (!options || !options.keepSidebar) {
     renderSidebar();
   }
@@ -138,6 +151,22 @@ function setScreen(html, activeNav, options) {
 // -- Auth: login / create account -----------------------------------------
 
 let loginRole = "student";
+let serverMode = false; // true when this app is connected to a CAVY server
+
+// pywebview rejects with an Error-like object when Python raises.
+function errorText(err) {
+  if (!err) return "Something went wrong.";
+  const text = typeof err === "string" ? err : err.message || "";
+  // Some bridges prefix the Python exception class ("PermissionError: ...").
+  return text.replace(/^[A-Za-z]+Error:\s*/, "") || "Something went wrong.";
+}
+
+window.addEventListener("unhandledrejection", (event) => {
+  event.preventDefault();
+  if (isSignedOutError(event.reason)) handleSignedOut(event.reason);
+  else showToast(errorText(event.reason));
+});
+
 
 function authHero() {
   return `
@@ -155,7 +184,159 @@ function authHero() {
     </div>`;
 }
 
+// -- Server connection (login screen) ----------------------------------------
+
+function renderServerLine() {
+  const line = document.getElementById("serverLine");
+  if (!line) return;
+  Promise.all([api().get_server_settings(), api().get_hosting()]).then(([settings, hosting]) => {
+    serverMode = settings.mode === "server";
+    const text = serverMode
+      ? `Connected to <strong>${escapeHtml(settings.url)}</strong>`
+      : "Working on this computer only";
+    const hostText = hosting.running
+      ? `Hosting a server &middot; <button class="auth-link" id="hostButton">Manage</button>`
+      : `<button class="auth-link" id="hostButton">Host a server on this computer</button>`;
+    line.innerHTML = `${text} &middot; <button class="auth-link" id="serverChangeButton">${serverMode ? "Change server" : "Connect to a server"}</button><br />${hostText}`;
+    document
+      .getElementById("serverChangeButton")
+      .addEventListener("click", () => showServerModal(settings));
+    document.getElementById("hostButton").addEventListener("click", () => showHostModal(hosting));
+  });
+}
+
+function showHostModal(hosting) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const running = hosting.running;
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>${running ? "This computer is hosting CAVY" : "Host a classroom server"}</h2>
+      ${
+        running
+          ? `<p class="muted">Other computers connect with this address (they type it into <em>Connect to a server</em> on their login screen):</p>
+             <div class="temp-password">${hosting.addresses.map(escapeHtml).join("<br />")}</div>
+             <p class="muted">Keep this computer on, on the same network, and keep CAVY open. Closing CAVY stops the server for everyone.</p>
+             <p class="muted">Data is stored at <code>${escapeHtml(hosting.database)}</code>.</p>`
+          : `<p class="muted">Run the classroom server on this computer. Students and teachers on other computers on the same Wi-Fi or network connect to it, and everything they do is stored here. You'll manage accounts and see live activity in the admin panel.</p>
+             <p class="muted">Your computer may ask whether to allow CAVY to accept network connections. Choose <strong>Allow</strong> (on Windows, tick <em>Private networks</em>).</p>
+             <label class="modal-field">Port <input type="text" id="hostPort" value="8000" /></label>`
+      }
+      <p class="auth-error" id="hostError">${escapeHtml(hosting.error || "")}</p>
+      <div class="modal-actions">
+        <button class="ghost" id="hostClose">Close</button>
+        ${
+          running
+            ? `<button class="ghost" id="hostStop">Stop server</button><button class="primary" id="hostAdmin">Open admin panel</button>`
+            : `<button class="primary" id="hostStart">Start server</button>`
+        }
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const done = () => {
+    overlay.remove();
+    renderServerLine();
+  };
+  document.getElementById("hostClose").addEventListener("click", done);
+  const errorEl = document.getElementById("hostError");
+  const start = document.getElementById("hostStart");
+  if (start) {
+    start.addEventListener("click", () => {
+      start.disabled = true;
+      start.textContent = "Starting…";
+      api()
+        .start_hosting(Number(document.getElementById("hostPort").value) || 8000)
+        .then((result) => {
+          overlay.remove();
+          if (!result.ok) {
+            showHostModal({ ...result, running: false });
+            return;
+          }
+          showHostModal(result);
+          renderServerLine();
+        })
+        .catch((err) => {
+          start.disabled = false;
+          start.textContent = "Start server";
+          errorEl.textContent = errorText(err);
+        });
+    });
+  }
+  const stop = document.getElementById("hostStop");
+  if (stop) {
+    stop.addEventListener("click", () => {
+      api()
+        .stop_hosting()
+        .then(() => {
+          overlay.remove();
+          renderServerLine();
+          showToast("Server stopped.");
+        });
+    });
+  }
+  const admin = document.getElementById("hostAdmin");
+  if (admin) {
+    admin.addEventListener("click", () => {
+      api()
+        .open_admin_panel()
+        .then((result) => {
+          if (!result.ok) errorEl.textContent = result.error;
+        });
+    });
+  }
+}
+
+function showServerModal(settings) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>CAVY server</h2>
+      <p class="muted">Enter the address your teacher or lab admin gave you, for example <code>192.168.1.20:8000</code>. Leave it empty to work on this computer only.</p>
+      <label class="modal-field">Server address
+        <input type="text" id="serverUrlInput" placeholder="192.168.1.20:8000" value="${escapeHtml(settings.url || "")}" />
+      </label>
+      <p class="auth-error" id="serverError"></p>
+      <div class="modal-actions">
+        <button class="ghost" id="serverCancel">Cancel</button>
+        <button class="primary" id="serverSave">Connect</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById("serverUrlInput");
+  input.focus();
+  document.getElementById("serverCancel").addEventListener("click", () => overlay.remove());
+  const save = () => {
+    const button = document.getElementById("serverSave");
+    button.disabled = true;
+    button.textContent = "Connecting…";
+    api()
+      .set_server(input.value)
+      .then((result) => {
+        button.disabled = false;
+        button.textContent = "Connect";
+        if (!result.ok) {
+          document.getElementById("serverError").textContent = result.error;
+          return;
+        }
+        overlay.remove();
+        renderServerLine();
+        showToast(result.mode === "server" ? "Connected to the server." : "Using this computer only.");
+      })
+      .catch((err) => {
+        button.disabled = false;
+        button.textContent = "Connect";
+        document.getElementById("serverError").textContent = errorText(err);
+      });
+  };
+  document.getElementById("serverSave").addEventListener("click", save);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") save();
+  });
+}
+
 function showLogin() {
+  stopLiveUpdates();
   document.getElementById("root").classList.add("auth-mode");
   document.getElementById("authScreen").innerHTML = `
     ${authHero()}
@@ -164,6 +345,7 @@ function showLogin() {
         <div class="icon-tile">${icon("sparkle")}</div>
         <h2>Welcome back</h2>
         <p class="subtitle">Sign in to pick up your session where you left it.</p>
+        ${loginNotice ? `<p class="notice notice-warn">${escapeHtml(loginNotice)}</p>` : ""}
         <div class="role-toggle">
           <button class="${loginRole === "student" ? "active" : ""}" data-role="student">Student</button>
           <button class="${loginRole === "professor" ? "active" : ""}" data-role="professor">Teacher</button>
@@ -177,6 +359,7 @@ function showLogin() {
         <div class="auth-footer">
           New to CAVY? <button class="auth-link" id="goToCreateAccount">Create an account</button>
         </div>
+        <div class="server-line" id="serverLine"></div>
       </div>
     </div>
   `;
@@ -187,6 +370,7 @@ function showLogin() {
       showLogin();
     });
   });
+  renderServerLine();
 
   document.getElementById("goToCreateAccount").addEventListener("click", showCreateAccount);
 
@@ -206,6 +390,9 @@ function showLogin() {
         } else {
           errorEl.textContent = result.error || "Login failed.";
         }
+      })
+      .catch((err) => {
+        errorEl.textContent = errorText(err);
       });
   };
   document.getElementById("loginButton").addEventListener("click", doLogin);
@@ -277,9 +464,12 @@ function showCreateAccount() {
           errorEl.textContent = result.error || "Could not create account.";
           return;
         }
-        api()
+        return api()
           .login(loginRole, email, password)
           .then((loginResult) => enterApp(loginResult.role, loginResult.name));
+      })
+      .catch((err) => {
+        errorEl.textContent = errorText(err);
       });
   });
 }
@@ -300,7 +490,7 @@ const STUDENT_NAV_ITEMS = [
 const PROFESSOR_NAV_ITEMS = [
   { key: "home", label: "Home", icon: "home", action: showProfessorHome },
   { key: "my-labs", label: "My Labs", icon: "layers", action: showMyLabs },
-  { key: "students", label: "Students", icon: "people", action: showStudents },
+  { key: "students", label: "My Class", icon: "people", action: showStudents },
   { key: "reports", label: "Reports", icon: "chart", action: showReportsList },
   { key: "resources", label: "Resources", icon: "resources", action: showResources },
   { key: "profile", label: "Profile", icon: "profile", action: showProfile },
@@ -440,15 +630,340 @@ function renderWorkspaceHeaderExtra(durationMinutes, onEndSession) {
   }, 1000);
 }
 
+// -- Resources -------------------------------------------------------------------
+//
+// Professors share files, links and written instructions with their own class
+// (or chosen students in it) and can attach them to labs. Students see what
+// their professor shared, on the Resources screen and on each lab's page.
+
+const RESOURCE_KIND_LABEL = { FILE: "File", LINK: "Link", NOTE: "Instructions" };
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+function formatBytes(bytes) {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function shortDate(iso) {
+  if (!iso) return "";
+  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(iso) ? iso : `${iso}Z`);
+  return isNaN(d) ? "" : d.toLocaleDateString();
+}
+
+function resourceCard(r, manage) {
+  const labs = r.labs.length
+    ? r.labs.map((l) => `<span class="chip">${escapeHtml(l.title)}</span>`).join(" ")
+    : "";
+  let detail = "";
+  if (r.kind === "FILE") detail = `${escapeHtml(r.filename || "file")} &middot; ${formatBytes(r.size_bytes)}`;
+  if (r.kind === "LINK") detail = escapeHtml(r.url || "");
+  let actions = "";
+  if (r.kind === "FILE") {
+    actions = `<button class="primary" data-act="open">Open</button><button class="ghost" data-act="save">Save as…</button>`;
+  } else if (r.kind === "LINK") {
+    actions = `<button class="primary" data-act="link">Open link</button>`;
+  } else {
+    actions = `<button class="primary" data-act="read">Read</button>`;
+  }
+  if (manage) {
+    actions += `<button class="ghost" data-act="edit">Edit</button><button class="ghost danger-text" data-act="delete">Delete</button>`;
+  }
+  const sharing = manage
+    ? `<div class="muted resource-meta">${r.audience_all ? "Shared with your whole class" : `Shared with ${r.student_ids.length} selected student${r.student_ids.length === 1 ? "" : "s"}`}</div>`
+    : "";
+  return `
+    <div class="card resource-card" data-resource-id="${r.id}">
+      <div class="resource-head">
+        <span class="kind-badge kind-${r.kind.toLowerCase()}">${RESOURCE_KIND_LABEL[r.kind] || r.kind}</span>
+        <h3>${escapeHtml(r.title)}</h3>
+      </div>
+      ${r.description ? `<p class="muted resource-desc">${escapeHtml(r.description)}</p>` : ""}
+      ${detail ? `<p class="resource-detail">${detail}</p>` : ""}
+      ${labs ? `<div class="resource-labs">${labs}</div>` : ""}
+      <div class="muted resource-meta">${manage ? "" : `From ${escapeHtml(r.owner || "your teacher")} &middot; `}${shortDate(r.updated_at || r.created_at)}</div>
+      ${sharing}
+      <div class="resource-actions">${actions}</div>
+    </div>`;
+}
+
+function bindResourceCards(container, resources, handlers = {}) {
+  const byId = Object.fromEntries(resources.map((r) => [r.id, r]));
+  container.querySelectorAll(".resource-card").forEach((card) => {
+    const resource = byId[Number(card.dataset.resourceId)];
+    if (!resource) return;
+    card.querySelectorAll("[data-act]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const act = button.dataset.act;
+        const run = (promise) =>
+          promise.then((result) => {
+            if (result && result.ok === false && !result.cancelled) {
+              showToast(result.error || "That didn't work.");
+            }
+          });
+        if (act === "open") run(api().open_resource(resource.id));
+        else if (act === "save") run(api().save_resource(resource.id));
+        else if (act === "link") run(api().open_link(resource.url));
+        else if (act === "read") showNoteModal(resource);
+        else if (act === "edit" && handlers.onEdit) handlers.onEdit(resource);
+        else if (act === "delete" && handlers.onDelete) handlers.onDelete(resource);
+      });
+    });
+  });
+}
+
+function showNoteModal(resource) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:640px;">
+      <h2>${escapeHtml(resource.title)}</h2>
+      <div class="note-body">${escapeHtml(resource.body || "")}</div>
+      <div class="modal-actions"><button class="primary" id="noteClose">Close</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("noteClose").addEventListener("click", () => overlay.remove());
+}
+
 function showResources() {
-  setScreen(
-    `
-    <div class="page-heading"><div><h1>Resources</h1><p class="subtitle">Reference material for the labs you're working on.</p></div></div>
-    <div class="card">
-      <p class="muted">Nothing has been attached to your labs yet — professors add reference material (datasets, docs, cheat sheets) when they create a session.</p>
-    </div>`,
-    "resources"
-  );
+  if (currentRole === "professor") showProfessorResources();
+  else showStudentResources();
+}
+
+let resourceLabFilter = "";
+
+function showStudentResources() {
+  Promise.all([api().get_student_resources(), api().get_my_teacher()]).then(([resources, teacher]) => {
+    const labs = new Map();
+    resources.forEach((r) => r.labs.forEach((l) => labs.set(l.id, l.title)));
+    const filter = labs.has(Number(resourceLabFilter)) ? resourceLabFilter : "";
+    const shown = filter
+      ? resources.filter((r) => r.labs.some((l) => String(l.id) === filter))
+      : resources;
+    let body;
+    if (!teacher) {
+      body = `<div class="card"><p class="muted">You haven't been added to a teacher's class yet, so there is nothing shared with you. Ask your teacher to add you (they can do it from the My Class screen).</p></div>`;
+    } else if (!resources.length) {
+      body = `<div class="card"><p class="muted">${escapeHtml(teacher)} hasn't shared anything with you yet. New material appears here by itself.</p></div>`;
+    } else {
+      body = `<div class="resource-grid">${shown.map((r) => resourceCard(r, false)).join("")}</div>`;
+    }
+    nextRefresh = { topics: ["resources", "accounts"], run: () => showStudentResources() };
+    setScreen(
+      `
+      <div class="page-heading"><div><h1>Resources</h1>
+        <p class="subtitle">${teacher ? `Shared with you by ${escapeHtml(teacher)}.` : "Reference material for your labs."}</p></div>
+        ${
+          labs.size
+            ? `<label class="inline-filter">Lab <select id="resourceLabFilter"><option value="">All resources</option>${[...labs]
+                .map(([id, title]) => `<option value="${id}" ${String(id) === filter ? "selected" : ""}>${escapeHtml(title)}</option>`)
+                .join("")}</select></label>`
+            : ""
+        }
+      </div>
+      ${body}`,
+      "resources"
+    );
+    const select = document.getElementById("resourceLabFilter");
+    if (select) {
+      select.addEventListener("change", () => {
+        resourceLabFilter = select.value;
+        showStudentResources();
+      });
+    }
+    bindResourceCards(app, shown);
+  });
+}
+
+function showProfessorResources() {
+  api()
+    .get_my_resources()
+    .then((resources) => {
+      nextRefresh = { topics: ["resources"], run: () => showProfessorResources() };
+      setScreen(
+        `
+        <div class="page-heading"><div><h1>Resources</h1>
+          <p class="subtitle">Share files, links and instructions with your students, and attach them to labs.</p></div>
+          <button class="primary" id="addResource">${icon("plus")}Add resource</button>
+        </div>
+        ${
+          resources.length
+            ? `<div class="resource-grid">${resources.map((r) => resourceCard(r, true)).join("")}</div>`
+            : `<div class="card"><p class="muted">Nothing shared yet. Use <b>Add resource</b> to upload a file, add a link, or write instructions. Only students in your class can see it.</p></div>`
+        }`,
+        "resources"
+      );
+      document.getElementById("addResource").addEventListener("click", () =>
+        showResourceForm(null, showProfessorResources)
+      );
+      bindResourceCards(app, resources, {
+        onEdit: (resource) => showResourceForm(resource, showProfessorResources),
+        onDelete: (resource) =>
+          confirmModal({
+            title: `Delete "${resource.title}"?`,
+            message: "Students will no longer see it. This can't be undone.",
+            confirmLabel: "Delete",
+            danger: true,
+            onConfirm: () =>
+              api()
+                .delete_resource(resource.id)
+                .then((result) => {
+                  if (!result.ok) showToast(result.error || "Couldn't delete it.");
+                  showProfessorResources();
+                }),
+          }),
+      });
+    });
+}
+
+function showResourceForm(existing, onSaved) {
+  Promise.all([api().get_students(), api().get_professor_labs()]).then(([students, labs]) => {
+    const editing = !!existing;
+    let kind = editing ? existing.kind : "FILE";
+    let picked = null; // {name, type, size, base64}
+    const chosenStudents = new Set(existing ? existing.student_ids : []);
+    const chosenLabs = new Set(existing ? existing.task_ids : []);
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card resource-form">
+        <h2>${editing ? "Edit resource" : "Add a resource"}</h2>
+        ${
+          editing
+            ? ""
+            : `<div class="role-toggle" id="kindTabs">
+                 <button data-kind="FILE" class="active">File</button>
+                 <button data-kind="LINK">Link</button>
+                 <button data-kind="NOTE">Instructions</button>
+               </div>`
+        }
+        <label class="modal-field">Title <input type="text" id="resTitle" value="${escapeHtml(existing ? existing.title : "")}" maxlength="300" /></label>
+        <label class="modal-field">Description (optional) <input type="text" id="resDesc" value="${escapeHtml(existing && existing.description ? existing.description : "")}" /></label>
+        <div id="kindFile" class="modal-field">
+          <span>${editing ? `Current file: <b>${escapeHtml(existing.filename || "")}</b> (${formatBytes(existing.size_bytes)}). Choose another to replace it.` : "File (PDF, document, slides, image, data… up to 15 MB)"}</span>
+          <input type="file" id="resFile" />
+        </div>
+        <label class="modal-field" id="kindLink">Web address <input type="text" id="resUrl" placeholder="https://…" value="${escapeHtml(existing && existing.url ? existing.url : "")}" /></label>
+        <label class="modal-field" id="kindNote">Instructions <textarea id="resBody" rows="6">${escapeHtml(existing && existing.body ? existing.body : "")}</textarea></label>
+
+        <div class="modal-field"><b>Who can see it</b>
+          <label class="inline-check"><input type="radio" name="aud" value="all" ${!existing || existing.audience_all ? "checked" : ""} /> My whole class (${students.length} student${students.length === 1 ? "" : "s"})</label>
+          <label class="inline-check"><input type="radio" name="aud" value="some" ${existing && !existing.audience_all ? "checked" : ""} /> Only selected students</label>
+          <div class="check-list" id="studentList" style="display:none;">
+            ${
+              students.length
+                ? students.map((s) => `<label class="inline-check"><input type="checkbox" data-student="${s.id}" ${chosenStudents.has(s.id) ? "checked" : ""} /> ${escapeHtml(s.name)} <span class="muted">${escapeHtml(s.email || "")}</span></label>`).join("")
+                : `<p class="muted">You have no students in your class yet. Add some on the Students screen first.</p>`
+            }
+          </div>
+        </div>
+
+        <div class="modal-field"><b>Attach to labs (optional)</b>
+          <div class="check-list">
+            ${
+              labs.length
+                ? labs.map((l) => `<label class="inline-check"><input type="checkbox" data-lab="${l.id}" ${chosenLabs.has(l.id) ? "checked" : ""} /> ${escapeHtml(l.title)}</label>`).join("")
+                : `<p class="muted">You haven't created any labs yet.</p>`
+            }
+          </div>
+        </div>
+        <p class="auth-error" id="resError"></p>
+        <div class="modal-actions">
+          <button class="ghost" id="resCancel">Cancel</button>
+          <button class="primary" id="resSave">${editing ? "Save changes" : "Add resource"}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const show = (id, on) => (document.getElementById(id).style.display = on ? "" : "none");
+    const syncKind = () => {
+      show("kindFile", kind === "FILE");
+      show("kindLink", kind === "LINK");
+      show("kindNote", kind === "NOTE");
+    };
+    const syncAudience = () =>
+      show("studentList", overlay.querySelector('input[name="aud"]:checked').value === "some");
+    syncKind();
+    syncAudience();
+    overlay.querySelectorAll('input[name="aud"]').forEach((r) => r.addEventListener("change", syncAudience));
+    overlay.querySelectorAll("#kindTabs button").forEach((button) =>
+      button.addEventListener("click", () => {
+        kind = button.dataset.kind;
+        overlay.querySelectorAll("#kindTabs button").forEach((b) => b.classList.toggle("active", b === button));
+        syncKind();
+      })
+    );
+    const errorEl = document.getElementById("resError");
+    document.getElementById("resCancel").addEventListener("click", () => overlay.remove());
+
+    document.getElementById("resFile").addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      picked = null;
+      errorEl.textContent = "";
+      if (!file) return;
+      if (file.size > MAX_UPLOAD_BYTES) {
+        errorEl.textContent = `That file is ${formatBytes(file.size)}. The limit is 15 MB.`;
+        event.target.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result);
+        picked = { name: file.name, type: file.type, size: file.size, base64: text.slice(text.indexOf(",") + 1) };
+        const title = document.getElementById("resTitle");
+        if (!title.value.trim()) title.value = file.name.replace(/\.[^.]+$/, "");
+      };
+      reader.onerror = () => (errorEl.textContent = "That file couldn't be read.");
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById("resSave").addEventListener("click", () => {
+      const spec = {
+        kind,
+        title: document.getElementById("resTitle").value,
+        description: document.getElementById("resDesc").value,
+        audience_all: overlay.querySelector('input[name="aud"]:checked').value === "all",
+        student_ids: [...overlay.querySelectorAll("[data-student]:checked")].map((c) => Number(c.dataset.student)),
+        task_ids: [...overlay.querySelectorAll("[data-lab]:checked")].map((c) => Number(c.dataset.lab)),
+      };
+      if (kind === "LINK") spec.url = document.getElementById("resUrl").value;
+      if (kind === "NOTE") spec.body = document.getElementById("resBody").value;
+      if (kind === "FILE") {
+        if (picked) {
+          spec.filename = picked.name;
+          spec.mime_type = picked.type;
+          spec.data_base64 = picked.base64;
+        } else if (!editing) {
+          errorEl.textContent = "Choose a file to upload.";
+          return;
+        } else {
+          spec.filename = existing.filename;
+        }
+      }
+      const button = document.getElementById("resSave");
+      button.disabled = true;
+      button.textContent = "Saving…";
+      const call = editing ? api().update_resource(existing.id, spec) : api().create_resource(spec);
+      call
+        .then((result) => {
+          if (!result.ok) {
+            errorEl.textContent = result.error || "Couldn't save it.";
+            button.disabled = false;
+            button.textContent = editing ? "Save changes" : "Add resource";
+            return;
+          }
+          overlay.remove();
+          showToast(editing ? "Resource updated." : "Resource added.");
+          onSaved();
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+          button.disabled = false;
+          button.textContent = editing ? "Save changes" : "Add resource";
+        });
+    });
+  });
 }
 
 function showProfile() {
@@ -468,7 +983,7 @@ function showProfile() {
       <p><b>${escapeHtml(profile.name)}</b> <span class="pill pill-neutral">${roleLabel}</span></p>
       <p class="muted" style="margin-top:6px;">${escapeHtml(profile.email || "")}</p>
       ${profile.enrollment_no ? `<p class="muted">Enrolment No. ${escapeHtml(profile.enrollment_no)}</p>` : ""}
-      <p class="muted" style="margin-top:6px;">Your data stays on this computer &mdash; multi-device sync is coming in a later phase.</p>
+      <p class="muted" id="teacherLine" style="margin-top:6px;"></p>
       <button class="danger" id="logoutButton" style="margin-top:16px;">Log Out</button>
     </div>
     <div class="card" style="max-width:420px; margin-top:16px;">
@@ -506,6 +1021,14 @@ function showProfile() {
       });
       setUpPasswordChange();
       setUpAiSettings();
+      if (profile.role === "student") {
+        api()
+          .get_my_teacher()
+          .then((teacher) => {
+            const el = document.getElementById("teacherLine");
+            if (el) el.textContent = teacher ? `Your teacher: ${teacher}` : "You aren't in a teacher's class yet.";
+          });
+      }
     });
 }
 
@@ -547,7 +1070,8 @@ function setUpPasswordChange() {
 let aiSetupPromptShown = false;
 
 function maybePromptAiSetup() {
-  if (aiSetupPromptShown) return;
+  // On a server the assistant is shared by the whole class; only a teacher sets it up.
+  if (aiSetupPromptShown || (serverMode && currentRole !== "professor")) return;
   aiSetupPromptShown = true;
   api()
     .get_ai_settings()
@@ -644,6 +1168,19 @@ const AI_PROVIDER_HINTS = {
 };
 
 function setUpAiSettings() {
+  if (serverMode && currentRole !== "professor") {
+    // Shared assistant: students see its status but can't change it.
+    document.getElementById("aiProviderToggle").style.display = "none";
+    document.querySelector("#aiSaveButton").closest(".auth-form").style.display = "none";
+    api()
+      .get_ai_settings()
+      .then((settings) => {
+        document.getElementById("aiStatusLine").textContent = settings.available
+          ? "The class assistant is ready."
+          : `The class assistant isn't available. ${settings.problem || ""} Ask your teacher.`;
+      });
+    return;
+  }
   let selected = "ollama";
   const statusLine = document.getElementById("aiStatusLine");
   const errorEl = document.getElementById("aiSettingsError");
@@ -792,6 +1329,10 @@ function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) 
     .get_professor_labs(showCreateButton && showArchivedLabs)
     .then((allLabs) => {
       const render = (labs) => {
+        nextRefresh = {
+          topics: ["labs", "submissions"],
+          run: () => renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton),
+        };
         setScreen(
           `
           <div class="page-heading">
@@ -824,7 +1365,7 @@ function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) 
         if (showCreateButton) {
           document
             .getElementById("createSessionButton")
-            .addEventListener("click", showCreateSession);
+            .addEventListener("click", () => showCreateSession());
         }
         document.querySelectorAll(".view-report-button").forEach((btn) => {
           btn.addEventListener("click", () => showLabReport(Number(btn.dataset.taskId)));
@@ -901,6 +1442,7 @@ function showProfessorHome() {
   api()
     .get_professor_dashboard_summary()
     .then((summary) => {
+      nextRefresh = { topics: ["labs", "submissions", "activity"], run: () => showProfessorHome() };
       setScreen(
         `
         <div class="page-heading">
@@ -937,58 +1479,107 @@ function showReportsList() {
 }
 
 function showStudents() {
-  api()
-    .get_students()
-    .then((students) => {
-      const rows = students
-        .map(
-          (student) => `
-        <tr>
-          <td>${escapeHtml(student.name)}${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
-          <td>${escapeHtml(student.email || "—")}</td>
-          <td>${escapeHtml(student.enrollment_no || "—")}</td>
-          <td><button class="ghost reset-password-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Reset password</button></td>
-        </tr>`
-        )
-        .join("");
-      setScreen(
-        `
-    <div class="page-heading"><div><h1>Students</h1><p class="subtitle">Students with an account on this computer.</p></div></div>
+  Promise.all([api().get_students(), api().get_unassigned_students()]).then(([students, unassigned]) => {
+    const rows = students
+      .map(
+        (student) => `
+      <tr>
+        <td>${escapeHtml(student.name)}${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
+        <td>${escapeHtml(student.email || "—")}</td>
+        <td>${escapeHtml(student.enrollment_no || "—")}</td>
+        <td class="row-actions-cell"><div class="row-actions">
+          <button class="ghost reset-password-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Reset password</button>
+          <button class="ghost remove-student-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Remove</button>
+        </div></td>
+      </tr>`
+      )
+      .join("");
+    const addable = unassigned
+      .map(
+        (s) => `<label class="inline-check"><input type="checkbox" data-add="${s.id}" /> ${escapeHtml(s.name)} <span class="muted">${escapeHtml(s.email || "")}${s.enrollment_no ? " · " + escapeHtml(s.enrollment_no) : ""}</span></label>`
+      )
+      .join("");
+    nextRefresh = { topics: ["accounts", "presence"], run: () => showStudents() };
+    setScreen(
+      `
+    <div class="page-heading"><div><h1>My class</h1><p class="subtitle">The students in your class. Only you (and an administrator) can manage them or share resources with them.</p></div></div>
     <div class="card" style="padding:0; overflow:hidden;">
       <table class="data-table">
         <thead><tr><th>Name</th><th>Email</th><th>Enrolment No.</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="muted" style="padding:16px;">No student accounts yet.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="4" class="muted" style="padding:16px;">Nobody in your class yet. Add students below.</td></tr>`}</tbody>
       </table>
     </div>
-    <p class="muted" style="margin-top:12px;">Accounts are stored on the computer they were created on, so this list only includes students who signed up here. A class-wide roster needs the multi-device sync phase.</p>`,
-        "students"
-      );
-      document.querySelectorAll(".reset-password-button").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const studentId = Number(btn.dataset.studentId);
-          confirmModal({
-            title: `Reset ${btn.dataset.name}'s password?`,
-            message:
-              "They'll get a temporary password and will be asked to choose a new one the next time they sign in. Their current password stops working immediately.",
-            confirmLabel: "Reset password",
-            danger: true,
-            onConfirm: () =>
-              api()
-                .reset_student_password(studentId)
-                .then((result) => {
-                  if (result.ok) {
-                    showTemporaryPassword(btn.dataset.name, result.temporary_password, showStudents);
-                  } else {
-                    showToast(result.error || "Couldn't reset the password.");
-                  }
-                }),
+    <div class="page-heading" style="margin-top:28px;"><div><h2>Add students</h2>
+      <p class="subtitle">Students who have an account but aren't in anyone's class yet. A student can be in one class at a time.</p></div></div>
+    <div class="card">
+      ${
+        unassigned.length
+          ? `<div class="check-list">${addable}</div><button class="primary" id="addToClass" style="margin-top:12px;">Add selected to my class</button>`
+          : `<p class="muted">Every student with an account is already in a class. New students appear here after they sign up.</p>`
+      }
+    </div>`,
+      "students"
+    );
+    const addButton = document.getElementById("addToClass");
+    if (addButton) {
+      addButton.addEventListener("click", () => {
+        const ids = [...document.querySelectorAll("[data-add]:checked")].map((c) => Number(c.dataset.add));
+        if (!ids.length) {
+          showToast("Tick the students to add.");
+          return;
+        }
+        api()
+          .add_students_to_class(ids)
+          .then((result) => {
+            if (!result.ok) showToast(result.error || "Couldn't add them.");
+            else showToast(`${result.added} student${result.added === 1 ? "" : "s"} added.`);
+            showStudents();
           });
+      });
+    }
+    document.querySelectorAll(".remove-student-button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        confirmModal({
+          title: `Remove ${btn.dataset.name} from your class?`,
+          message:
+            "They will no longer see your resources. Their work and scores are kept. Another professor (or you again) can add them later.",
+          confirmLabel: "Remove",
+          danger: true,
+          onConfirm: () =>
+            api()
+              .remove_student_from_class(Number(btn.dataset.studentId))
+              .then((result) => {
+                if (!result.ok) showToast(result.error || "Couldn't remove them.");
+                showStudents();
+              }),
         });
       });
     });
+    document.querySelectorAll(".reset-password-button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const studentId = Number(btn.dataset.studentId);
+        confirmModal({
+          title: `Reset ${btn.dataset.name}'s password?`,
+          message:
+            "They'll get a temporary password and will be asked to choose a new one the next time they sign in. Their current password stops working immediately.",
+          confirmLabel: "Reset password",
+          danger: true,
+          onConfirm: () =>
+            api()
+              .reset_student_password(studentId)
+              .then((result) => {
+                if (result.ok) {
+                  showTemporaryPassword(btn.dataset.name, result.temporary_password, showStudents);
+                } else {
+                  showToast(result.error || "Couldn't reset the password.");
+                }
+              }),
+        });
+      });
+    });
+  });
 }
 
-// Shown once: the temporary password isn't stored anywhere in readable form.
 function showTemporaryPassword(studentName, temporaryPassword, onClose) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -1320,6 +1911,7 @@ function showLabReport(taskId) {
       .filter(Boolean)
       .join(" | ");
 
+    nextRefresh = { topics: ["submissions", "activity"], run: () => showLabReport(taskId) };
     setScreen(
       `
         <button class="back-link" id="backButton">${icon("back")}Back to Dashboard</button>
@@ -1395,6 +1987,7 @@ function showLabs() {
         )
         .join("");
 
+      nextRefresh = { topics: ["labs"], run: () => showLabs() };
       setScreen(
         `
         <div class="page-heading">
@@ -1461,8 +2054,12 @@ function followupAssessmentCards(followups) {
 }
 
 function showStages(taskId) {
-  Promise.all([api().get_stages(taskId), api().get_followup_assessments(taskId)]).then(
-    ([data, followups]) => {
+  Promise.all([
+    api().get_stages(taskId),
+    api().get_followup_assessments(taskId),
+    api().get_lab_resources(taskId),
+  ]).then(
+    ([data, followups, labResources]) => {
       const steps = data.stages
         .map((stage, index) => {
           const connector =
@@ -1494,6 +2091,11 @@ function showStages(taskId) {
         )
         .join("");
 
+      const resourceSection = labResources.length
+        ? `<div class="page-heading" style="margin-top:28px;"><h2>Resources for this lab</h2></div>
+           <div class="resource-grid">${labResources.map((r) => resourceCard(r, false)).join("")}</div>`
+        : "";
+      nextRefresh = { topics: ["labs", "resources"], run: () => showStages(taskId) };
       setScreen(
         `
         <button class="back-link" id="backButton">${icon("back")}Back to Dashboard</button>
@@ -1503,9 +2105,11 @@ function showStages(taskId) {
         <div class="stepper">${steps}</div>
         <div class="stage-list">${cards}</div>
         ${followupAssessmentCards(followups)}
+        ${resourceSection}
       `,
         "home"
       );
+      bindResourceCards(app, labResources);
 
       document.getElementById("backButton").addEventListener("click", showLabs);
       app.querySelectorAll(".stage-card").forEach((card) => {
@@ -1911,6 +2515,10 @@ function renderChatPanel(container, info, getFiles) {
           el.textContent = "Assistant ready";
           return;
         }
+        if (serverMode && currentRole !== "professor") {
+          el.textContent = "Assistant not available — ask your teacher to set it up.";
+          return;
+        }
         el.innerHTML = `Assistant not available — <button class="auth-link" id="chatSetupLink">Set up</button>`;
         document.getElementById("chatSetupLink").addEventListener("click", () => {
           showAiSetupModal(settings, refreshChatStatus);
@@ -1989,13 +2597,13 @@ function showSubmission(sessionId) {
         <button class="back-link" id="backButton">${icon("back")}Back to Lab</button>
         <div class="submission-wrap">
           <div class="checkmark">&#10003;</div>
-          <h1>Assessment Submitted Successfully</h1>
+          <h1>${escapeHtml(summary.label || "Work")} Submitted Successfully</h1>
           <p class="muted">Your submission has been successfully submitted for evaluation.</p>
           <div class="submission-details">
             <div class="card">
               <span class="meta-icon">${icon("clock")}</span>
               <p class="muted">Submission Time</p>
-              <p><b>${escapeHtml(summary.submitted_at || "-")}</b></p>
+              <p><b>${escapeHtml(summary.submitted_at ? new Date(/[zZ]|[+-]\d\d:\d\d$/.test(summary.submitted_at) ? summary.submitted_at : summary.submitted_at + "Z").toLocaleString() : "-")}</b></p>
             </div>
             <div class="card">
               <span class="meta-icon">${icon("check")}</span>
@@ -2238,9 +2846,110 @@ function showMyProgress() {
     });
 }
 
+// -- Live updates -------------------------------------------------------------
+//
+// When connected to a server, the app holds a request open ("long poll"). The
+// server answers the moment something changes (a lab is published, a student
+// submits, ...), and the current screen redraws itself. Nothing refreshes while
+// a dialog is open or someone is typing, so it never steals focus or input.
+
+let liveLoopId = 0;
+let liveVersions = {};
+let liveChangedTopics = new Set();
+let liveRetryTimer = null;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isSignedOutError(err) {
+  if (!err) return false;
+  if (err.name === "PermissionError") return true;
+  return /signed out by an administrator|session expired|sign in again|account was (disabled|removed)|password was reset|sign-in details were changed/i.test(
+    err.message || ""
+  );
+}
+
+let loginNotice = "";
+
+function handleSignedOut(err) {
+  stopLiveUpdates();
+  currentRole = null;
+  loginNotice = errorText(err);
+  showLogin();
+}
+
+function stopLiveUpdates() {
+  liveLoopId += 1;
+  liveVersions = {};
+  liveChangedTopics = new Set();
+  clearTimeout(liveRetryTimer);
+}
+
+function userIsBusy() {
+  if (document.querySelector(".modal-overlay")) return true;
+  const el = document.activeElement;
+  return !!(el && app.contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+}
+
+function applyLiveChange() {
+  if (!currentRefresh) {
+    liveChangedTopics.clear();
+    return;
+  }
+  const relevant = currentRefresh.topics.some((t) => liveChangedTopics.has(t));
+  if (!relevant) {
+    liveChangedTopics.clear();
+    return;
+  }
+  if (userIsBusy()) {
+    // Try again shortly rather than interrupting.
+    clearTimeout(liveRetryTimer);
+    liveRetryTimer = setTimeout(applyLiveChange, 1500);
+    return;
+  }
+  liveChangedTopics.clear();
+  pendingScroll = app.scrollTop;
+  currentRefresh.run();
+}
+
+function startLiveUpdates() {
+  stopLiveUpdates();
+  if (!serverMode) return;
+  const loopId = liveLoopId;
+  const tick = async () => {
+    while (loopId === liveLoopId) {
+      try {
+        const known = liveVersions;
+        const first = Object.keys(known).length === 0 && !startLiveUpdates.seeded;
+        const result = await api().wait_for_updates(known, !first);
+        if (loopId !== liveLoopId) return;
+        if (!result.live) return;
+        startLiveUpdates.seeded = true;
+        if (!first) {
+          Object.keys(result.versions).forEach((topic) => {
+            if (result.versions[topic] > (known[topic] || 0)) liveChangedTopics.add(topic);
+          });
+        }
+        liveVersions = result.versions;
+        if (liveChangedTopics.size) applyLiveChange();
+      } catch (err) {
+        if (loopId !== liveLoopId) return;
+        if (isSignedOutError(err)) {
+          handleSignedOut(err);
+          return;
+        }
+        await sleep(3000); // a network blip: try again
+      }
+    }
+  };
+  startLiveUpdates.seeded = false;
+  tick();
+}
+
 // -- Bootstrap -------------------------------------------------------
 
 function enterApp(role, name, mustChangePassword = false) {
+  loginNotice = "";
+  startLiveUpdates();
   currentRole = role;
   currentUserName = name;
   document.getElementById("root").classList.remove("auth-mode");

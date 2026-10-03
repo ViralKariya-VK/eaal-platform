@@ -46,6 +46,19 @@ pilot = [
     "uvicorn>=0.30,<1.0",
 ]
 
+# The central server (eaal_platform.server): HTTP API + admin panel.
+server = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn>=0.30,<1.0",
+]
+
+# Building the installers (scripts/build_release.py): PyInstaller bundles the
+# app, its Python and all libraries into a single self-contained app.
+build = [
+    "pyinstaller>=6.10,<7.0",
+    "dmgbuild>=1.6; sys_platform == 'darwin'",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -53,6 +66,10 @@ where = ["src"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom: Depends()/Query() as parameter defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "N", "RUF"]

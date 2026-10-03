@@ -397,9 +397,21 @@ def change_password(
         if new_password == current_password:
             raise ValueError("Choose a password different from your current one.")
         account.password_hash = hash_password(new_password)
-        if isinstance(account, Student):
-            account.must_change_password = False
+        account.must_change_password = False
         db_session.commit()
+
+
+def reset_professor_password(session_factory: sessionmaker[OrmSession], professor_id: int) -> str:
+    """Give a professor a new random temporary password and return it (shown once)."""
+    with session_factory() as db_session:
+        professor = db_session.get(Professor, professor_id)
+        if professor is None:
+            raise ValueError(f"No professor with id {professor_id}")
+        temporary = generate_temporary_password()
+        professor.password_hash = hash_password(temporary)
+        professor.must_change_password = True
+        db_session.commit()
+        return temporary
 
 
 def reset_student_password(session_factory: sessionmaker[OrmSession], student_id: int) -> str:

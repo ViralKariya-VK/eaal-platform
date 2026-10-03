@@ -38,7 +38,12 @@ def test_create_account_then_login_as_professor(
     api.create_account("professor", "Dr. Kariya", "prof@example.com", "hunter2-hunter2")
 
     result = api.login("professor", "prof@example.com", "hunter2-hunter2")
-    assert result == {"ok": True, "role": "professor", "name": "Dr. Kariya"}
+    assert result == {
+        "ok": True,
+        "role": "professor",
+        "name": "Dr. Kariya",
+        "must_change_password": False,
+    }
     logger.stop()
 
 

@@ -44,6 +44,8 @@ from pathlib import Path
 from time import monotonic
 
 _IS_POSIX = sys.platform != "win32"
+# In a packaged app sys.executable is CAVY itself, not a Python interpreter.
+_IS_FROZEN = bool(getattr(sys, "frozen", False))
 _SUPPORTS_MEMORY_LIMIT = sys.platform == "linux"
 
 _DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -61,6 +63,13 @@ class ExecutionOutcome:
     exit_status: int | None
     duration_ms: int
     timed_out: bool
+
+
+def _command_for(script_path: Path) -> list[str]:
+    """argv that runs a student's script (see ``launcher`` for the packaged case)."""
+    if _IS_FROZEN:
+        return [sys.executable, "--cavy-run-script", str(script_path)]
+    return [sys.executable, str(script_path)]
 
 
 def _truncate(text: str, limit: int = _MAX_CAPTURED_OUTPUT_CHARS) -> str:
@@ -124,12 +133,14 @@ def run_code(
             # mitigated by the timeout/rlimits above and by the OS-level
             # process boundary, not by avoiding subprocess.
             completed = subprocess.run(  # nosec B603
-                [sys.executable, str(script_path)],
+                _command_for(script_path),
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
                 cwd=tmp_dir,
                 preexec_fn=preexec_fn,  # POSIX only; ignored/unset on Windows
+                # A packaged Windows app has no console: don't flash one per run.
+                creationflags=0 if _IS_POSIX else getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             stdout, stderr, exit_status = (
                 completed.stdout,

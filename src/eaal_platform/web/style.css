@@ -1699,3 +1699,140 @@ textarea {
 .progress-history-table {
   margin-top: 12px;
 }
+
+/* -- Server connection ----------------------------------------------------------------- */
+.server-line {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+/* -- Resources ------------------------------------------------------------------------ */
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.resource-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resource-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.resource-head h3 {
+  font-size: 15px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.kind-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--cream-100);
+  color: var(--text-muted);
+}
+.kind-file {
+  background: var(--teal-bg);
+  color: var(--teal-text);
+}
+.kind-link {
+  background: var(--amber-bg);
+  color: var(--amber-text);
+}
+.kind-note {
+  background: var(--cream-100);
+  color: var(--text-primary);
+}
+.resource-desc,
+.resource-detail,
+.resource-meta {
+  margin: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.resource-labs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--cream-100);
+  color: var(--text-primary);
+}
+.resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+.danger-text {
+  color: var(--red-text);
+}
+.note-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+  max-height: 55vh;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+.inline-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.resource-form {
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.resource-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px 2px;
+}
+.row-actions-cell {
+  white-space: normal;
+}
+.resource-form .inline-check {
+  margin: 0;
+  gap: 8px;
+  font-size: 13px;
+}
+.resource-form .modal-field {
+  margin-top: 10px;
+}
+.resource-form .check-list {
+  gap: 4px;
+  max-height: 130px;
+}

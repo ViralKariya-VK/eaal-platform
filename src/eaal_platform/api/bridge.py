@@ -28,7 +28,10 @@ normally give a per-request session/cookie.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
+import io
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,8 +42,14 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.ai.groq_provider import GroqProvider
 from eaal_platform.ai.ollama_provider import OllamaProvider
-from eaal_platform.ai.provider import AIProvider, GenerationContext, Purpose, UnavailableProvider
+from eaal_platform.ai.provider import (
+    AIProvider,
+    GenerationContext,
+    ProviderHolder,
+    Purpose,
+)
 from eaal_platform.auth import password_problem
+from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     authenticate_professor,
     authenticate_student,
@@ -91,6 +100,7 @@ from eaal_platform.sandbox.executor import run_code as sandbox_run_code
 from eaal_platform.signals.compute import compute_all_signals, persist_signal_scores
 
 _ENTRY_FILENAME = "main.py"
+_DISABLED_MESSAGE = "This account has been disabled. Ask your administrator."
 
 _STAGE_TYPES = (StageType.LEARNING, StageType.EXPLORATION, StageType.ASSESSMENT)
 
@@ -103,6 +113,21 @@ def _is_lab(task: Task) -> bool:
 def _is_archived(task: Task) -> bool:
     parent = task.linked_task
     return task.archived_at is not None or (parent is not None and parent.archived_at is not None)
+
+
+def save_text_file(
+    dialog: Callable[[str], str | None] | None, exported: dict[str, Any]
+) -> dict[str, Any]:
+    """Ask where to save ``exported`` ({filename, csv}) and write it there."""
+    if dialog is None:
+        return {"ok": False, "error": "Saving files isn't available in this window."}
+    chosen = dialog(exported["filename"])
+    if not chosen:
+        return {"ok": False, "cancelled": True}
+    # utf-8-sig so Excel opens non-ASCII names correctly.
+    with Path(chosen).open("w", newline="", encoding="utf-8-sig") as handle:
+        handle.write(exported["csv"])
+    return {"ok": True, "path": chosen}
 
 
 def _csv_safe(value: object) -> str:
@@ -163,10 +188,17 @@ class CavyApi:
         event_logger: EventLogger,
         ai_provider: AIProvider | None = None,
         save_file_dialog: Callable[[str], str | None] | None = None,
+        *,
+        ai_holder: ProviderHolder | None = None,
+        professors_set_ai: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._event_logger = event_logger
-        self._ai_provider = ai_provider or UnavailableProvider()
+        # Shared with other CavyApi instances when running as a server, so the
+        # whole class uses one AI backend; standalone, it's just this app's.
+        self._ai_holder = ai_holder or ProviderHolder(ai_provider)
+        # On the server, only professors may change the class-wide AI backend.
+        self._professors_set_ai = professors_set_ai
         # Opens the OS "Save as" dialog and returns the chosen path (None if
         # cancelled). Injected by app.py because only the window can show it;
         # the webview can't download files itself.
@@ -175,6 +207,14 @@ class CavyApi:
         self._current_student_name: str | None = None
         self._current_professor_id: int | None = None
         self._current_professor_name: str | None = None
+
+    @property
+    def _ai_provider(self) -> AIProvider:
+        return self._ai_holder.provider
+
+    @_ai_provider.setter
+    def _ai_provider(self, provider: AIProvider) -> None:
+        self._ai_holder.provider = provider
 
     # -- auth --------------------------------------------------------------
 
@@ -190,6 +230,8 @@ class CavyApi:
             result = authenticate_student(self._session_factory, email=email, password=password)
             if result is None:
                 return {"ok": False, "error": "Incorrect email or password."}
+            if self._is_disabled("student", result[0]):
+                return {"ok": False, "error": _DISABLED_MESSAGE}
             self._current_student_id, self._current_student_name = result
             self._current_professor_id, self._current_professor_name = None, None
             return {
@@ -202,9 +244,16 @@ class CavyApi:
             result = authenticate_professor(self._session_factory, email=email, password=password)
             if result is None:
                 return {"ok": False, "error": "Incorrect email or password."}
+            if self._is_disabled("professor", result[0]):
+                return {"ok": False, "error": _DISABLED_MESSAGE}
             self._current_professor_id, self._current_professor_name = result
             self._current_student_id, self._current_student_name = None, None
-            return {"ok": True, "role": "professor", "name": self._current_professor_name}
+            return {
+                "ok": True,
+                "role": "professor",
+                "name": self._current_professor_name,
+                "must_change_password": self._professor_must_change_password(),
+            }
         raise ValueError(f"Unknown role {role!r}")
 
     def create_account(
@@ -237,10 +286,32 @@ class CavyApi:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
 
+    def _identity(self) -> tuple[str, int] | None:
+        """(role, id) of whoever is signed in, for the server's bookkeeping."""
+        if self._current_student_id is not None:
+            return "student", self._current_student_id
+        if self._current_professor_id is not None:
+            return "professor", self._current_professor_id
+        return None
+
+    def _is_disabled(self, role: str, user_id: int) -> bool:
+        with self._session_factory() as db_session:
+            account: Student | Professor | None
+            if role == "student":
+                account = db_session.get(Student, user_id)
+            else:
+                account = db_session.get(Professor, user_id)
+            return bool(account and account.disabled)
+
     def _student_must_change_password(self) -> bool:
         with self._session_factory() as db_session:
             student = db_session.get(Student, self._require_student_id())
             return bool(student and student.must_change_password)
+
+    def _professor_must_change_password(self) -> bool:
+        with self._session_factory() as db_session:
+            professor = db_session.get(Professor, self._require_professor_id())
+            return bool(professor and professor.must_change_password)
 
     def get_profile(self) -> dict[str, Any]:
         """The signed-in user's own account details, for the Profile screen."""
@@ -263,7 +334,7 @@ class CavyApi:
                         "name": professor.display_name,
                         "email": professor.email,
                         "enrollment_no": None,
-                        "must_change_password": False,
+                        "must_change_password": professor.must_change_password,
                     }
         raise ValueError("Not logged in")
 
@@ -287,38 +358,145 @@ class CavyApi:
         return {"ok": True}
 
     def get_students(self) -> list[dict[str, Any]]:
-        """Students with an account on this device (professor roster / reset list)."""
+        """The students in this professor's class."""
+        return resource_store.class_students(self._session_factory, self._require_professor_id())
+
+    def get_unassigned_students(self) -> list[dict[str, Any]]:
+        """Students not in anyone's class yet: the ones a professor may add to theirs."""
         self._require_professor_id()
-        with self._session_factory() as db_session:
-            students = (
-                db_session.query(Student)
-                .filter(Student.email.is_not(None))
-                .order_by(Student.display_name)
-                .all()
+        return resource_store.unassigned_students(self._session_factory)
+
+    def add_students_to_class(self, student_ids: list[int]) -> dict[str, Any]:
+        professor_id = self._require_professor_id()
+        try:
+            added = resource_store.add_to_class(
+                self._session_factory, professor_id, [int(i) for i in student_ids]
             )
-            return [
-                {
-                    "id": student.id,
-                    "name": student.display_name,
-                    "email": student.email,
-                    "enrollment_no": student.enrollment_no,
-                    "must_change_password": student.must_change_password,
-                }
-                for student in students
-            ]
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "added": added}
+
+    def remove_student_from_class(self, student_id: int) -> dict[str, Any]:
+        professor_id = self._require_professor_id()
+        try:
+            resource_store.remove_from_class(self._session_factory, professor_id, int(student_id))
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def get_my_teacher(self) -> str | None:
+        """The professor whose class the signed-in student is in (None if nobody's yet)."""
+        return resource_store.student_teacher(self._session_factory, self._require_student_id())
 
     def reset_student_password(self, student_id: int) -> dict[str, Any]:
-        """Set a temporary password for a student who is locked out.
+        """Set a temporary password for a student in this professor's class.
 
         Returned once, in the clear, so the professor can pass it on; the
         student is made to replace it at next sign-in.
         """
-        self._require_professor_id()
+        professor_id = self._require_professor_id()
+        with self._session_factory() as db_session:
+            student = db_session.get(Student, student_id)
+            if student is None or student.professor_id != professor_id:
+                return {"ok": False, "error": "That student isn't in your class."}
         try:
             temporary = reset_student_password_row(self._session_factory, student_id)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "temporary_password": temporary}
+
+    # -- resources ---------------------------------------------------------------------
+
+    @staticmethod
+    def _resource_input(spec: dict[str, Any]) -> resource_store.ResourceInput:
+        raw = spec.get("data_base64")
+        data: bytes | None = None
+        if raw:
+            try:
+                data = base64.b64decode(str(raw), validate=True)
+            except (binascii.Error, ValueError):
+                raise resource_store.ResourceError("That file couldn't be read.") from None
+        return resource_store.ResourceInput(
+            kind=str(spec.get("kind", "")),
+            title=str(spec.get("title", "")),
+            description=spec.get("description"),
+            url=spec.get("url"),
+            body=spec.get("body"),
+            filename=spec.get("filename"),
+            mime_type=spec.get("mime_type"),
+            data=data,
+            audience_all=bool(spec.get("audience_all", True)),
+            student_ids=[int(i) for i in spec.get("student_ids") or []],
+            task_ids=[int(i) for i in spec.get("task_ids") or []],
+        )
+
+    def get_my_resources(self) -> list[dict[str, Any]]:
+        """Everything this professor has shared (professors only)."""
+        return resource_store.professor_resources(
+            self._session_factory, self._require_professor_id()
+        )
+
+    def create_resource(self, spec: dict[str, Any]) -> dict[str, Any]:
+        professor_id = self._require_professor_id()
+        try:
+            new_id = resource_store.create_resource(
+                self._session_factory, professor_id, self._resource_input(spec)
+            )
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "id": new_id}
+
+    def update_resource(self, resource_id: int, spec: dict[str, Any]) -> dict[str, Any]:
+        professor_id = self._require_professor_id()
+        try:
+            resource_store.update_resource(
+                self._session_factory, professor_id, int(resource_id), self._resource_input(spec)
+            )
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def delete_resource(self, resource_id: int) -> dict[str, Any]:
+        professor_id = self._require_professor_id()
+        try:
+            resource_store.delete_resource(self._session_factory, professor_id, int(resource_id))
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def get_student_resources(self) -> list[dict[str, Any]]:
+        """Resources shared with the signed-in student (by their professor)."""
+        return resource_store.student_resources(self._session_factory, self._require_student_id())
+
+    def get_lab_resources(self, task_id: int) -> list[dict[str, Any]]:
+        """Resources attached to one lab that the signed-in person may see."""
+        self._require_logged_in()
+        if self._current_professor_id is not None:
+            return resource_store.professor_resources(
+                self._session_factory, self._current_professor_id, int(task_id)
+            )
+        return resource_store.student_resources(
+            self._session_factory, self._require_student_id(), int(task_id)
+        )
+
+    def get_resource_file(self, resource_id: int) -> dict[str, Any]:
+        """An uploaded file's bytes (base64), if the signed-in person may open it."""
+        self._require_logged_in()
+        role, user_id = ("professor", self._current_professor_id)
+        if user_id is None:
+            role, user_id = "student", self._require_student_id()
+        try:
+            filename, mime_type, data = resource_store.resource_file(
+                self._session_factory, role=role, user_id=user_id, resource_id=int(resource_id)
+            )
+        except resource_store.ResourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "filename": filename,
+            "mime_type": mime_type,
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        }
 
     def logout(self) -> None:
         self._current_student_id, self._current_student_name = None, None
@@ -540,30 +718,29 @@ class CavyApi:
         set_lab_archived_row(self._session_factory, task_id, archived=False)
         return {"ok": True}
 
-    def export_lab_report(self, task_id: int) -> dict[str, Any]:
-        """Write a lab's report as a CSV file the professor picks a location for."""
+    def get_lab_report_csv(self, task_id: int) -> dict[str, Any]:
+        """A lab's report as CSV text plus a suggested file name (professors only)."""
         self._require_professor_id()
         report = self.get_lab_report(task_id)
-        if self._save_file_dialog is None:
-            return {"ok": False, "error": "Saving files isn't available in this window."}
         safe_title = "".join(c if c.isalnum() or c in "-." else "_" for c in report["task_title"])
-        chosen = self._save_file_dialog(f"{safe_title}_report.csv")
-        if not chosen:
-            return {"ok": False, "cancelled": True}
-        with Path(chosen).open("w", newline="", encoding="utf-8-sig") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["Student Name", "Enrolment No.", "Score", "Submitted On", "Status"])
-            for row in report["rows"]:
-                writer.writerow(
-                    [
-                        _csv_safe(row["student_name"]),
-                        _csv_safe(row["enrollment_no"]),
-                        _csv_safe(row["score"]),
-                        _csv_safe(row["submitted_at"]),
-                        _csv_safe(row["status"]),
-                    ]
-                )
-        return {"ok": True, "path": chosen}
+        buffer = io.StringIO(newline="")
+        writer = csv.writer(buffer)
+        writer.writerow(["Student Name", "Enrolment No.", "Score", "Submitted On", "Status"])
+        for row in report["rows"]:
+            writer.writerow(
+                [
+                    _csv_safe(row["student_name"]),
+                    _csv_safe(row["enrollment_no"]),
+                    _csv_safe(row["score"]),
+                    _csv_safe(row["submitted_at"]),
+                    _csv_safe(row["status"]),
+                ]
+            )
+        return {"filename": f"{safe_title}_report.csv", "csv": buffer.getvalue()}
+
+    def export_lab_report(self, task_id: int) -> dict[str, Any]:
+        """Write a lab's report as a CSV file the professor picks a location for."""
+        return save_text_file(self._save_file_dialog, self.get_lab_report_csv(task_id))
 
     def get_professor_labs(self, include_archived: bool = False) -> list[dict[str, Any]]:
         self._require_professor_id()
@@ -809,26 +986,39 @@ class CavyApi:
         )
         return {"snapshot_id": snapshot_id}
 
-    def run_code(
+    def prepare_run(
         self, session_id: int, files: dict[str, str], entry_filename: str = _ENTRY_FILENAME
     ) -> dict[str, Any]:
+        """Record that code is about to run; the caller then runs it and calls ``record_run``."""
         if entry_filename not in files:
             entry_filename = _ENTRY_FILENAME
         snapshot_id = self._save_snapshot(session_id, files, active_filename=entry_filename)
         self._log_event(session_id, EventType.CODE_RUN, code_version_id=snapshot_id)
+        return {"snapshot_id": snapshot_id, "entry_filename": entry_filename}
 
-        outcome = sandbox_run_code(files, entry_filename=entry_filename)
-
+    def record_run(
+        self,
+        session_id: int,
+        snapshot_id: int,
+        entry_filename: str,
+        outcome: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Store the result of a run (``outcome`` has stdout, stderr, exit_status, ...)."""
+        stdout = str(outcome.get("stdout", ""))
+        stderr = str(outcome.get("stderr", ""))
+        duration_ms = int(outcome.get("duration_ms", 0))
+        timed_out = bool(outcome.get("timed_out", False))
+        exit_status = outcome.get("exit_status")
         with self._session_factory() as db_session:
             db_session.add(
                 ExecutionResult(
                     session_id=session_id,
                     code_version_id=snapshot_id,
-                    stdout=outcome.stdout,
-                    stderr=outcome.stderr,
-                    exit_status=outcome.exit_status,
-                    duration_ms=outcome.duration_ms,
-                    timed_out=outcome.timed_out,
+                    stdout=stdout,
+                    stderr=stderr,
+                    exit_status=exit_status,
+                    duration_ms=duration_ms,
+                    timed_out=timed_out,
                 )
             )
             db_session.commit()
@@ -838,24 +1028,43 @@ class CavyApi:
             EventType.EXECUTION_RESULT,
             code_version_id=snapshot_id,
             payload={
-                "exit_status": outcome.exit_status,
-                "duration_ms": outcome.duration_ms,
-                "timed_out": outcome.timed_out,
+                "exit_status": exit_status,
+                "duration_ms": duration_ms,
+                "timed_out": timed_out,
                 # Whether the run actually produced output — S3.2 (Knowledge
                 # Application) uses this so a no-op program (e.g. bare
                 # `pass`) that merely exits cleanly can't score the same as
                 # one that did something.
-                "has_output": bool(outcome.stdout.strip()),
+                "has_output": bool(stdout.strip()),
             },
         )
         return {
             "entry_filename": entry_filename,
-            "stdout": outcome.stdout,
-            "stderr": outcome.stderr,
-            "exit_status": outcome.exit_status,
-            "duration_ms": outcome.duration_ms,
-            "timed_out": outcome.timed_out,
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_status": exit_status,
+            "duration_ms": duration_ms,
+            "timed_out": timed_out,
         }
+
+    def run_code(
+        self, session_id: int, files: dict[str, str], entry_filename: str = _ENTRY_FILENAME
+    ) -> dict[str, Any]:
+        """Run code on this machine (standalone mode) and record the result."""
+        prepared = self.prepare_run(session_id, files, entry_filename)
+        outcome = sandbox_run_code(files, entry_filename=prepared["entry_filename"])
+        return self.record_run(
+            session_id,
+            prepared["snapshot_id"],
+            prepared["entry_filename"],
+            {
+                "stdout": outcome.stdout,
+                "stderr": outcome.stderr,
+                "exit_status": outcome.exit_status,
+                "duration_ms": outcome.duration_ms,
+                "timed_out": outcome.timed_out,
+            },
+        )
 
     def submit_session(self, session_id: int, files: dict[str, str]) -> dict[str, Any]:
         snapshot_id = self._save_snapshot(session_id, files)
@@ -915,6 +1124,8 @@ class CavyApi:
         A Groq key is accepted only if Groq answers with it, and is held in
         memory only, never written to the database or disk.
         """
+        if self._professors_set_ai:
+            self._require_professor_id()
         candidate: AIProvider
         if provider == "ollama":
             candidate = OllamaProvider()
@@ -1033,7 +1244,15 @@ class CavyApi:
                 exit_status = (
                     "Timed out" if last_result.timed_out else f"Exit code {last_result.exit_status}"
                 )
-            return {"submitted_at": submitted_at, "exit_status": exit_status}
+            if session is None or session.stage is None:
+                label = "Practice"
+            else:
+                label = {
+                    StageType.LEARNING: "Learning stage",
+                    StageType.EXPLORATION: "Exploration stage",
+                    StageType.ASSESSMENT: "Assessment",
+                }[session.stage.stage_type]
+            return {"submitted_at": submitted_at, "exit_status": exit_status, "label": label}
 
     def get_ciq_score(self, session_id: int) -> dict[str, Any]:
         with self._session_factory() as db_session:

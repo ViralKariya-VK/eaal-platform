@@ -33,14 +33,32 @@ Tick each box as it ships. Sizes are rough estimates.
 
 ## A. Classroom / multi-user
 
-- [ ] **A1. Central data sync + admin panel** — a small server that each app syncs to (the admin panel for resetting professor passwords, D4, lives here), so
-      a professor sees students from every device. (Stopgap option: student
-      exports a result file, professor imports it.) — *L, 1–2 weeks (stopgap 2–3 days)*
-- [ ] **A2. Class-wide students roster** — the Students screen now lists
-      accounts on *this* computer (built for D2); a roster across devices
-      needs A1. — *S*
-- [ ] **A3. Cross-device lab reports** — reports today only show students
-      who used the professor's own machine. Needs A1. — *S*
+- [x] **A1. Central server + admin panel** — built (see [DEMO_SETUP.md](DEMO_SETUP.md)).
+      `python -m eaal_platform.server` runs one shared database behind an
+      HTTP API; each PC's app connects to it (login screen → *Connect to a
+      server*). Student code still runs on the student's PC; results are
+      recorded on the server. The admin panel (`/admin`) has: overview and
+      who's signed in, user list with password reset for **students and
+      professors** (this closes D4), labs with archive/restore, a read-only
+      database browser with linked records and CSV export, per-session
+      detail (events, AI chat, runs, code, scores), the shared AI
+      assistant's settings, and a full database backup. Verified with two
+      independent app instances against one server; **not yet verified on
+      the real multi-PC network or on Windows.**
+      Known limits: plain HTTP (trusted LAN only); open sign-up; first
+      visitor to `/admin` becomes admin; Groq key lives in server memory;
+      admin panel doesn't auto-refresh; the old local `synced_at` columns
+      are unused now.
+- [x] **A2. Class-wide students roster** — the Students screen now reads from
+      the server, so it lists every student on every PC.
+- [x] **A3. Cross-device lab reports** — reports read from the server, so a
+      professor sees students from every device.
+- [ ] **A4. Server hardening before any real rollout** — HTTPS, restricting
+      who can create teacher accounts, per-IP login throttling for the app
+      (only admin login is throttled today), server-side audit log, running
+      the server as a service/auto-start.
+- [ ] **A5. Offline tolerance** — if the server is unreachable mid-session
+      the student's Run/Submit fail with an error; nothing is queued.
 
 ## B. AI assistant
 
@@ -83,8 +101,17 @@ Tick each box as it ships. Sizes are rough estimates.
 - [x] **C3. Export a lab report as CSV** — the button already existed but
       did nothing in the real desktop window (pywebview blocks browser-style
       downloads). Now saves through a native Save dialog. PDF export not done.
-- [ ] **C4. Resources** — attach reference material (datasets, docs) to a
-      lab; the Resources screen is currently a static empty message. — *M*
+- [x] **C4. Resources + classes** — professors share files, links and written
+      instructions; attach them to labs; share with the whole class or chosen
+      students. A student is in **one professor's class** (professor adds
+      unassigned students from *My Class*; admin can assign/move anyone). Only
+      the owner and the owner's students can see a resource or download its
+      file (checked on the server, including direct file requests). Executable
+      file types are refused, links must be http/https, 15 MB limit. Verified
+      in a live two-professor / two-student run, including live updates.
+      **Not done:** labs themselves are still visible to every student (only
+      resources are scoped to classes); PDF preview inside the app (files open
+      in the computer's own viewer); upload progress / chunking for large files.
 
 ## D. Accounts
 
@@ -95,9 +122,9 @@ Tick each box as it ships. Sizes are rough estimates.
       password gives the student a one-time temporary password they must
       replace at next sign-in. Local accounts only, until sync exists.
 - [x] **D3. Fuller Profile screen** — name, role, email, enrolment number.
-- [ ] **D4. Professor password reset** — *deferred, depends on A1.* Decided:
-      an admin panel on the future server will reset professors' passwords.
-      Until then a locked-out professor has no recovery path.
+- [x] **D4. Professor password reset** — done via the admin panel (Users →
+      Reset password); the professor must choose a new password at next
+      sign-in. Verified end to end against a running server.
 
 ## E. Scoring quality
 
@@ -119,20 +146,46 @@ Tick each box as it ships. Sizes are rough estimates.
 
 ## F. Platform & sandbox
 
-- [ ] **F1. Run the full flow on a real Windows machine** — Windows support
-      has only been verified by reading the code. — *unknown*
+- [x] **F1. Run the full flow on a real Windows machine** — done; the user
+      ran the [WINDOWS_TESTING.md](WINDOWS_TESTING.md) checklist and reported everything working.
+      (Per-item results weren't recorded, and the `dev` test suite wasn't
+      necessarily run on Windows.)
 - [ ] **F2. Windows sandbox limits** — only a timeout applies on Windows;
       add CPU/memory limits via Job Objects. — *M*
-- [ ] **F3. Bundle sandbox libraries** (numpy, pandas, matplotlib) into the
-      release so labs that import them work out of the box. — *S*
+- [x] **F3. Bundle sandbox libraries** (numpy, pandas, matplotlib) — included in
+      the installer; student code runs through the packaged app itself.
 
 ## G. Packaging & release
 
-- [ ] **G1. macOS installer** (PyInstaller/py2app) that bundles Python and
-      dependencies; `CAVY.app` today embeds this machine's interpreter
-      path. — *M*
-- [ ] **G2. Windows installer.** — *M*
-- [ ] **G3. Ship the Monaco editor inside the release** (today it needs
-      `npm` via `scripts/fetch_monaco.py`). — *S*
-- [ ] **G4. CI** — GitHub Actions running ruff, mypy and pytest on every
-      push (no `.github/` yet). — *S*
+- [x] **G1. macOS installer** — `python scripts/build_release.py` on a Mac builds
+      a self-contained `CAVY.app` and a `.dmg` (Apple Silicon). No Python or
+      internet needed to install. The built app's student-code runner was
+      smoke-tested (stdlib + numpy). **Not yet verified:** opening the window
+      from the installed `.app` on a clean Mac, and a hosted server inside it.
+      Unsigned: first launch needs right-click → Open.
+- [ ] **G2. Windows installer** — recipe written (PyInstaller + Inno Setup,
+      built by GitHub Actions: `.github/workflows/release.yml`). **Never built
+      or run yet**; expect first-build fixes (pywebview/WebView2 packaging
+      is the likely snag). Unsigned: SmartScreen warning.
+- [x] **G3. Ship the Monaco editor inside the release** — the build fetches it
+      with npm and bundles it (falls back to the plain editor if npm is missing).
+- [x] **G4. CI** — `.github/workflows/ci.yml` runs ruff, mypy and pytest on
+      Linux, macOS and Windows. Written but not run yet (needs a push).
+- [ ] **G5. Code signing / notarization** (Apple Developer + Windows
+      certificate; paid) so installs show no warnings. Intel Mac build.
+- [ ] **G6. Auto-update** — installers are one-shot; new versions are re-installed by hand.
+
+## H. Live classroom (server mode)
+
+- [x] **H2. Live updates** — long-poll change feed: labs published by a
+      professor appear on student screens, submissions appear on the
+      professor's Home / Reports, without refreshing. Measured ~35 ms from
+      publish to appearing, locally. Screens never redraw while a dialog is
+      open or someone is typing, and never the code workspace.
+- [x] **H3. Admin: live control** — signed-in list with address and activity,
+      sign one/everyone out (the person sees why), edit credentials, reset
+      passwords, disable/enable, delete, add accounts, who's working on what,
+      lab progress counts, audit log, auto-refreshing overview.
+- [x] **H4. Host the server from the installed app** (no terminal).
+- [ ] **H5. Per-student view for the professor** of a single student's
+      progress (reuses My Progress data).

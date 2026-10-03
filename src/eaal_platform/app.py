@@ -15,6 +15,7 @@ import webview
 
 from eaal_platform.ai.ollama_provider import OllamaProvider
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.client.api import build_client_api
 from eaal_platform.db.bootstrap import seed_demo_content
 from eaal_platform.db.engine import create_db_engine, create_session_factory, init_db
 from eaal_platform.events.logger import EventLogger
@@ -75,12 +76,10 @@ def main() -> int:
     event_logger = EventLogger(session_factory)
     event_logger.start()
 
-    api = CavyApi(
-        session_factory,
-        event_logger,
-        ai_provider=OllamaProvider(),
-        save_file_dialog=_ask_where_to_save,
-    )
+    # Standalone data lives in the local database; if a server address is
+    # configured (Profile / login screen), the same calls go to the server.
+    local_api = CavyApi(session_factory, event_logger, ai_provider=OllamaProvider())
+    api = build_client_api(local_api, _ask_where_to_save)
 
     webview.create_window(
         "CAVY",
@@ -93,6 +92,7 @@ def main() -> int:
     )
     _set_macos_dock_identity()
     webview.start()
+    api.shutdown()
 
     event_logger.stop()
     engine.dispose()

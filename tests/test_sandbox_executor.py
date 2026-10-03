@@ -4,6 +4,7 @@ resource-limit cases."""
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -91,3 +92,70 @@ def test_output_is_truncated_beyond_limit() -> None:
     outcome = run_code(_files("print('x' * 50_000)"))
     assert len(outcome.stdout) < 50_000
     assert "truncated" in outcome.stdout
+
+
+# -- packaged-app mode ---------------------------------------------------------------------
+
+
+def test_launcher_runs_a_script_like_plain_python(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    script = tmp_path / "main.py"
+    script.write_text("import helper\nprint(helper.VALUE * 2)\n", encoding="utf-8")
+    (tmp_path / "helper.py").write_text("VALUE = 21\n", encoding="utf-8")
+
+    done = subprocess.run(
+        [sys.executable, "-m", "eaal_platform.launcher", "--cavy-run-script", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.stdout.strip() == "42"
+    assert done.returncode == 0
+
+
+def test_launcher_error_output_starts_at_the_students_file(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    script = tmp_path / "main.py"
+    script.write_text("def f():\n    return 1 / 0\nf()\n", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, "-m", "eaal_platform.launcher", "--cavy-run-script", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 1
+    assert "ZeroDivisionError" in done.stderr
+    assert "runpy" not in done.stderr
+    assert "launcher.py" not in done.stderr
+    assert "main.py" in done.stderr
+
+
+def test_launcher_passes_through_exit_codes(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    script = tmp_path / "main.py"
+    script.write_text("import sys\nsys.exit(3)\n", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, "-m", "eaal_platform.launcher", "--cavy-run-script", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 3
+
+
+def test_frozen_apps_run_student_code_through_themselves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eaal_platform.sandbox import executor
+
+    monkeypatch.setattr(executor, "_IS_FROZEN", True)
+    command = executor._command_for(Path("/tmp/x/main.py"))
+    assert command[1:] == ["--cavy-run-script", "/tmp/x/main.py"]
+    monkeypatch.setattr(executor, "_IS_FROZEN", False)
+    assert executor._command_for(Path("/tmp/x/main.py"))[1:] == ["/tmp/x/main.py"]

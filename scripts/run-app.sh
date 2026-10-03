@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Starts CAVY. Just run: ./run.sh
+# Starts CAVY from source (developers). Run: scripts/run-app.sh
 set -e
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."  # the project root
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate eaal-platform
 

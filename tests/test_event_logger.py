@@ -127,3 +127,32 @@ def test_stop_is_safe_to_call_multiple_times(logger: EventLogger, seeded_session
     logger.log(PendingEvent(session_id=seeded_session_id, event_type=EventType.TASK_START))
     logger.stop()
     logger.stop()  # must not raise
+
+
+def test_flush_writes_pending_events_immediately(
+    db_session_factory: sessionmaker[OrmSession],
+) -> None:
+    from eaal_platform.db.bootstrap import (
+        create_student_account,
+        seed_demo_content,
+        start_practice_session,
+    )
+    from eaal_platform.db.models import Event, EventType
+
+    seed_demo_content(db_session_factory)
+    student_id = create_student_account(
+        db_session_factory, display_name="A", email="a@x.com", password="hunter2-hunter2"
+    )
+    session_id = start_practice_session(db_session_factory, student_id)
+    logger = EventLogger(
+        db_session_factory, batch_size=100, flush_interval=60.0
+    )  # would wait a minute
+    logger.start()
+    logger.log(PendingEvent(session_id=session_id, event_type=EventType.CODE_RUN))
+
+    assert logger.flush() is True
+
+    with db_session_factory() as db:
+        assert db.query(Event).filter_by(session_id=session_id).count() == 1
+    logger.stop()
+    assert logger.flush() is True  # nothing running: returns instead of hanging

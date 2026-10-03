@@ -1,0 +1,49 @@
+name: Build installers
+
+# Builds the self-contained CAVY installers: a .dmg on macOS and a Setup.exe on
+# Windows. Run it from the Actions tab ("Run workflow"), or push a tag like v0.1.0.
+# Download the results from the run's "Artifacts" section.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4 # the code editor (Monaco) is fetched with npm
+        with:
+          node-version: "20"
+
+      - name: Install Inno Setup (Windows installer builder)
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
+      - name: Install CAVY and the build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[server,sandbox-libs,build]" pillow
+
+      - name: Build the installer
+        run: python scripts/build_release.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CAVY-${{ runner.os }}
+          path: |
+            dist/*.dmg
+            dist/*-Setup.exe
+            dist/*.zip
+          if-no-files-found: error

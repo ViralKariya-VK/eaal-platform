@@ -43,12 +43,28 @@ form that authors a real Lab (a `Task` with three `Stage`s, replacing
 hand-edited demo content) and a `View Report` per lab showing submission
 status and a provisional overall score per student.
 
-Not yet built: a server or cross-device sync — every account and every
+Not yet built: encryption (HTTPS) and offline queuing for the server mode. A central server now exists — see [docs/DEMO_SETUP.md](docs/DEMO_SETUP.md) — so the old note below applies only to standalone mode: a server or cross-device sync — every account and every
 lab is local to the machine it was created on. This is deliberately
 local-first for now — every table already carries a `synced_at` column so
 a central-sync phase can be added later without a schema rewrite. Because
 of this, the Professor Dashboard's reports only ever show students who
 used *this* device; a real classroom rollout needs that sync phase first.
+
+## Project layout
+
+```
+README.md          you are here
+pyproject.toml     dependencies and tool settings
+docs/              guides: DEMO_SETUP.md (classroom setup), WINDOWS_TESTING.md, ROADMAP.md
+scripts/           everything you run by hand: launchers and installer builders (see scripts/README.md)
+src/eaal_platform/ the application
+    api/ client/ server/ db/ ai/ signals/ sandbox/ events/ web/ assets/
+packaging/         recipes for the installers (PyInstaller, Inno Setup)
+tests/             automated tests
+validation/        research: validation of the 14 CIQ signals (the paper)
+pilot_web/         research: the small web survey used for the pilot study
+.github/           automatic builds and tests on GitHub
+```
 
 ## Setup
 
@@ -84,16 +100,16 @@ for Windows).
 macOS / Linux:
 
 ```bash
-./run.sh
+scripts/run-app.sh
 ```
 
 Windows (after activating your conda/venv environment in the same
-terminal — `run.bat` doesn't activate one for you, since a conda install's
+terminal — `scripts\run-app.bat` doesn't activate one for you, since a conda install's
 location isn't consistent across machines the way it is on the one dev
-machine `run.sh`'s macOS branch was written for):
+machine `run-app.sh`'s macOS branch was written for):
 
 ```bat
-run.bat
+scripts\run-app.bat
 ```
 
 Either way this runs the app as a plain Python process. On macOS this

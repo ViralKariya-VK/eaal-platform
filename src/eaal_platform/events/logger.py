@@ -41,6 +41,13 @@ class PendingEvent:
     timestamp: datetime | None = None
 
 
+class _FlushRequest:
+    """A marker in the queue: write everything before me, then signal ``done``."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+
+
 @dataclass(slots=True)
 class _Stats:
     """Internal counters, exposed read-only for tests and diagnostics."""
@@ -72,7 +79,7 @@ class EventLogger:
         self._batch_size = batch_size
         self._flush_interval = flush_interval
 
-        self._queue: queue.Queue[PendingEvent | None] = queue.Queue()
+        self._queue: queue.Queue[PendingEvent | _FlushRequest | None] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._stats = _Stats()
         self._stats_lock = threading.Lock()
@@ -89,6 +96,19 @@ class EventLogger:
         self._queue.put(pending)
         with self._stats_lock:
             self._stats.enqueued += 1
+
+    def flush(self, *, timeout: float = 3.0) -> bool:
+        """Write everything logged so far to the database now; False if it timed out.
+
+        Used when something is about to read the event log right after an
+        action (a submission being announced and scored), so it never sees a
+        half-written history.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            return True
+        request = _FlushRequest()
+        self._queue.put(request)
+        return request.done.wait(timeout)
 
     def stop(self, *, timeout: float | None = 5.0) -> None:
         """Signal the background thread to flush and exit, then join it."""
@@ -120,6 +140,12 @@ class EventLogger:
             if item is None:
                 self._flush(batch)
                 return
+
+            if isinstance(item, _FlushRequest):
+                self._flush(batch)
+                batch = []
+                item.done.set()
+                continue
 
             batch.append(item)
             if len(batch) >= self._batch_size:

@@ -338,3 +338,34 @@ def _events(
 ) -> list[Event]:
     with session_factory() as db_session:
         return db_session.query(Event).filter_by(session_id=session_id, event_type=event_type).all()
+
+
+def test_submission_summary_names_the_kind_of_work(
+    db_session_factory: sessionmaker[OrmSession],
+) -> None:
+    from eaal_platform.db.bootstrap import (
+        create_student_account,
+        seed_demo_content,
+        start_practice_session,
+        start_stage_session,
+    )
+    from eaal_platform.db.models import Stage
+
+    seed_demo_content(db_session_factory)
+    student_id = create_student_account(
+        db_session_factory, display_name="A", email="a@x.com", password="hunter2-hunter2"
+    )
+    logger = EventLogger(db_session_factory)
+    api = CavyApi(db_session_factory, logger)
+    api.login("student", "a@x.com", "hunter2-hunter2")
+
+    practice = start_practice_session(db_session_factory, student_id)
+    assert api.get_submission_summary(practice)["label"] == "Practice"
+    with db_session_factory() as db:
+        stages = db.query(Stage).order_by(Stage.id).limit(3).all()
+        expected = {s.id: s.stage_type.value for s in stages}
+    labels = []
+    for stage_id in expected:
+        sid = start_stage_session(db_session_factory, student_id, stage_id)
+        labels.append(api.get_submission_summary(sid)["label"])
+    assert labels == ["Learning stage", "Exploration stage", "Assessment"]

@@ -18,7 +18,18 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -115,6 +126,14 @@ class Student(Base):
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    # An admin can disable an account: it keeps its history but cannot sign in.
+    disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    # The one professor this student is in the class of (None = not assigned
+    # yet). Only that professor, or an admin, manages the student's class
+    # membership and can share resources with them.
+    professor_id: Mapped[int | None] = mapped_column(ForeignKey("professors.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -137,8 +156,33 @@ class Professor(Base):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # True after an admin resets this professor's password (see Student).
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    # An admin can disable an account: it keeps its history but cannot sign in.
+    disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Admin(Base):
+    """A server administrator (signs in to the admin panel, never to the app).
+
+    Deliberately a third table rather than a flag on ``Professor``: admins
+    manage accounts and data, they don't teach, and keeping them separate
+    means a teacher account can never be promoted by editing one column.
+    """
+
+    __tablename__ = "admins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Task(Base):
@@ -390,3 +434,93 @@ class SignalScore(Base):
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     session: Mapped[Session] = relationship(back_populates="signal_scores")
+
+
+class AuditLog(Base):
+    """Who did what, when (sign-ins, sign-outs, admin actions, lab changes).
+
+    Append-only and deliberately free of content: it records *that* a lab
+    was created or a password reset, never the lab text or the password.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class ResourceKind(enum.StrEnum):
+    FILE = "FILE"  # an uploaded document (PDF, slides, image, ...)
+    LINK = "LINK"  # a web address
+    NOTE = "NOTE"  # written instructions
+
+
+class Resource(Base):
+    """Reference material a professor shares with their students.
+
+    Visible to its owner and to the owner's students: all of them when
+    ``audience_all`` is true, otherwise only those in ``ResourceStudent``.
+    It can also be attached to labs (``ResourceLab``), where it is listed on
+    the lab's page. The file bytes live in ``ResourceFile`` so that listing
+    resources never loads them.
+    """
+
+    __tablename__ = "resources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    professor_id: Mapped[int] = mapped_column(ForeignKey("professors.id"), nullable=False)
+    kind: Mapped[ResourceKind] = mapped_column(Enum(ResourceKind), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(2000), nullable=True)  # LINK
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)  # NOTE
+    filename: Mapped[str | None] = mapped_column(String(300), nullable=True)  # FILE
+    mime_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audience_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ResourceFile(Base):
+    """The bytes of an uploaded file (one row per FILE resource)."""
+
+    __tablename__ = "resource_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    resource_id: Mapped[int] = mapped_column(
+        ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class ResourceLab(Base):
+    """A resource attached to a lab."""
+
+    __tablename__ = "resource_labs"
+    __table_args__ = (UniqueConstraint("resource_id", "task_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    resource_id: Mapped[int] = mapped_column(
+        ForeignKey("resources.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+
+
+class ResourceStudent(Base):
+    """A student a resource is shared with (used when the audience isn't everyone)."""
+
+    __tablename__ = "resource_students"
+    __table_args__ = (UniqueConstraint("resource_id", "student_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    resource_id: Mapped[int] = mapped_column(
+        ForeignKey("resources.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)

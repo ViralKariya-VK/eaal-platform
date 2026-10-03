@@ -113,7 +113,9 @@ def test_change_password_needs_a_login(api: CavyApi) -> None:
 
 
 def _student_id(api: CavyApi, email: str) -> int:
+    """Sign in as the professor and put both students in their class."""
     api.login("professor", "prof@example.com", _OLD)
+    api.add_students_to_class([s["id"] for s in api.get_unassigned_students()])
     return next(s["id"] for s in api.get_students() if s["email"] == email)
 
 
@@ -150,7 +152,7 @@ def test_reset_is_professor_only_and_validates_the_student(api: CavyApi) -> None
     student_id = _student_id(api, "asha@example.com")
     assert api.reset_student_password(99999) == {
         "ok": False,
-        "error": "No student with id 99999",
+        "error": "That student isn't in your class.",
     }
 
     api.login("student", "bram@example.com", _OLD)
@@ -178,14 +180,23 @@ def test_the_temporary_password_is_stored_hashed(
 
 
 def test_roster_lists_students_alphabetically(api: CavyApi) -> None:
-    api.login("professor", "prof@example.com", _OLD)
+    _student_id(api, "asha@example.com")
 
     roster = api.get_students()
 
     assert [s["name"] for s in roster] == ["Asha", "Bram"]
     assert roster[0]["enrollment_no"] == "BSC1"
     assert all(
-        set(entry) == {"id", "name", "email", "enrollment_no", "must_change_password"}
+        set(entry)
+        == {
+            "id",
+            "name",
+            "email",
+            "enrollment_no",
+            "must_change_password",
+            "professor_id",
+            "professor_name",
+        }
         for entry in roster
     )
 

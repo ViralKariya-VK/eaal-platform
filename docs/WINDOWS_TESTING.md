@@ -85,7 +85,7 @@ Start the app:
 python -m eaal_platform.app
 ```
 
-(`run.bat` does the same thing, but you must activate the environment first.)
+(`scripts\run-app.bat` does the same thing, but you must activate the environment first.)
 
 **Optional, the code editor:** `python scripts\fetch_monaco.py` (needs npm).
 Skip it if you don't have npm.

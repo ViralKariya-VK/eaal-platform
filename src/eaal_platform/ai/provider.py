@@ -135,3 +135,14 @@ class UnavailableProvider(AIProvider):
     @property
     def model_name(self) -> str | None:
         return None
+
+
+class ProviderHolder:
+    """A swappable reference to the active AI backend.
+
+    Lets several ``CavyApi`` instances (one per signed-in user on the
+    server) share one provider: changing it once changes it for everyone.
+    """
+
+    def __init__(self, provider: AIProvider | None = None) -> None:
+        self.provider: AIProvider = provider or UnavailableProvider()
