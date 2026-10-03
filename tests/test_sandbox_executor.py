@@ -155,7 +155,8 @@ def test_frozen_apps_run_student_code_through_themselves(
     from eaal_platform.sandbox import executor
 
     monkeypatch.setattr(executor, "_IS_FROZEN", True)
-    command = executor._command_for(Path("/tmp/x/main.py"))
-    assert command[1:] == ["--cavy-run-script", "/tmp/x/main.py"]
+    script = Path("x") / "main.py"  # separators differ between Windows and Mac/Linux
+    command = executor._command_for(script)
+    assert command[1:] == ["--cavy-run-script", str(script)]
     monkeypatch.setattr(executor, "_IS_FROZEN", False)
-    assert executor._command_for(Path("/tmp/x/main.py"))[1:] == ["/tmp/x/main.py"]
+    assert executor._command_for(script)[1:] == [str(script)]

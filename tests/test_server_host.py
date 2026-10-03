@@ -34,7 +34,8 @@ def test_host_starts_serves_and_stops(tmp_path: Path) -> None:
     finally:
         host.stop()
     assert not host.running
-    with pytest.raises(httpx.ConnectError):
+    # Windows can take a few seconds to refuse a connection, which shows up as a timeout.
+    with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
         httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=2)
 
 
