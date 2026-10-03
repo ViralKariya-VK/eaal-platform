@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.client.api import ClientApi
+from eaal_platform.db import approvals
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.host import ServerHost, build_state
 
@@ -69,6 +70,11 @@ def test_app_can_host_a_server_and_use_it(
         assert any(a.endswith(f":{port}") for a in result["addresses"])
         assert api.get_server_settings()["mode"] == "server"  # this app is now connected to itself
 
+        host_state = api._host.state
+        assert host_state is not None
+        approvals.add_entry(
+            host_state.session_factory, "professor", name="Dr K", email="k@example.com"
+        )
         api.create_account("professor", "Dr K", "k@example.com", "hunter2-hunter2")
         assert api.login("professor", "k@example.com", "hunter2-hunter2")["ok"] is True
         assert (tmp_path / "server.db").exists()  # data went to the server's file ...

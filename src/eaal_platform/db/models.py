@@ -524,3 +524,23 @@ class ResourceStudent(Base):
         ForeignKey("resources.id", ondelete="CASCADE"), nullable=False
     )
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+
+class AllowedEmail(Base):
+    """An email address an administrator has approved to create an account.
+
+    On a server, nobody can sign up unless their email is here (as a
+    ``student`` or a ``professor``), which keeps the platform to one
+    institution's people. The row stays after the person registers; whether
+    they have is worked out by looking for an account with that email.
+    Emails are stored lower-case.
+    """
+
+    __tablename__ = "allowed_emails"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # "student" | "professor"
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    enrollment_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

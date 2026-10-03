@@ -414,6 +414,15 @@ function showCreateAccount() {
           <button class="${loginRole === "student" ? "active" : ""}" data-role="student">Student</button>
           <button class="${loginRole === "professor" ? "active" : ""}" data-role="professor">Teacher</button>
         </div>
+        ${
+          serverMode
+            ? `<p class="notice" style="margin-top:12px;">${
+                loginRole === "student"
+                  ? "Use the university email address your administrator approved. Other emails can't create an account."
+                  : "Teacher accounts are set up by your administrator. Use the email address they added for you."
+              }</p>`
+            : ""
+        }
         <div class="auth-form">
           <label>Full Name <input type="text" id="createName" placeholder="Your name" /></label>
           <label>Email <input type="text" id="createEmail" placeholder="you@school.edu" /></label>

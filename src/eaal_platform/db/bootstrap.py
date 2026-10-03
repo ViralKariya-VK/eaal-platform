@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
@@ -79,6 +80,7 @@ def create_student_account(
     student or a professor — one email shouldn't silently work for both
     tabs on the Login screen).
     """
+    email = normalise_email(email)
     with session_factory() as db_session:
         _ensure_email_is_free(db_session, email)
         student = Student(
@@ -96,6 +98,7 @@ def create_professor_account(
     session_factory: sessionmaker[OrmSession], *, display_name: str, email: str, password: str
 ) -> int:
     """Create a new local Professor account and return its id."""
+    email = normalise_email(email)
     with session_factory() as db_session:
         _ensure_email_is_free(db_session, email)
         professor = Professor(
@@ -106,10 +109,15 @@ def create_professor_account(
         return professor.id
 
 
+def normalise_email(email: str) -> str:
+    """How emails are stored and compared: no surrounding spaces, all lower-case."""
+    return email.strip().lower()
+
+
 def _ensure_email_is_free(db_session: OrmSession, email: str) -> None:
-    if db_session.query(Student).filter_by(email=email).first() is not None:
+    if db_session.query(Student).filter(func.lower(Student.email) == email).first() is not None:
         raise ValueError(f"{email} is already registered as a student")
-    if db_session.query(Professor).filter_by(email=email).first() is not None:
+    if db_session.query(Professor).filter(func.lower(Professor.email) == email).first() is not None:
         raise ValueError(f"{email} is already registered as a professor")
 
 
@@ -118,7 +126,11 @@ def authenticate_student(
 ) -> tuple[int, str] | None:
     """Return ``(id, display_name)`` if the credentials match a Student account, else ``None``."""
     with session_factory() as db_session:
-        student = db_session.query(Student).filter_by(email=email).first()
+        student = (
+            db_session.query(Student)
+            .filter(func.lower(Student.email) == normalise_email(email))
+            .first()
+        )
         if student is None or student.password_hash is None:
             return None
         if not verify_password(password, student.password_hash):
@@ -131,7 +143,11 @@ def authenticate_professor(
 ) -> tuple[int, str] | None:
     """Return ``(id, display_name)`` if the credentials match a Professor account, else ``None``."""
     with session_factory() as db_session:
-        professor = db_session.query(Professor).filter_by(email=email).first()
+        professor = (
+            db_session.query(Professor)
+            .filter(func.lower(Professor.email) == normalise_email(email))
+            .first()
+        )
         if professor is None or professor.password_hash is None:
             return None
         if not verify_password(password, professor.password_hash):

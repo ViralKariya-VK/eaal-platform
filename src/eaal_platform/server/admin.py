@@ -12,6 +12,8 @@ session to events to code without any SQL.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import io
 import json
@@ -36,10 +38,12 @@ from sqlalchemy.engine import Row
 
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
+from eaal_platform.db import approval_import, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     create_professor_account,
     create_student_account,
+    normalise_email,
     reset_professor_password,
     reset_student_password,
     set_lab_archived,
@@ -180,6 +184,25 @@ class AssignRequest(BaseModel):
     professor_id: int | None = None  # None: take the student out of any class
 
 
+class AllowedRequest(BaseModel):
+    role: str
+    name: str | None = None
+    email: str
+    enrollment_no: str | None = None
+
+
+class AllowedUpdateRequest(BaseModel):
+    name: str | None = None
+    email: str
+    enrollment_no: str | None = None
+
+
+class ImportRequest(BaseModel):
+    role: str
+    filename: str
+    data_base64: str
+
+
 class CreateUserRequest(BaseModel):
     role: str
     name: str
@@ -249,7 +272,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
 
     def email_taken(db: Any, email: str, *, except_account: Student | Professor | None) -> bool:
         for model in (Student, Professor):
-            other = db.query(model).filter(model.email == email).first()
+            other = db.query(model).filter(func.lower(model.email) == email.lower()).first()
             if other is not None and other is not except_account:
                 return True
         return False
@@ -455,10 +478,11 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                 account.display_name = request.name.strip()
                 changed.append("name")
             if request.email is not None and request.email.strip():
-                email = request.email.strip()
-                if email != account.email:
+                email = normalise_email(request.email)
+                if email != (account.email or "").lower():
                     if email_taken(db, email, except_account=account):
                         raise HTTPException(status_code=400, detail="That email is already used.")
+                    approvals.follow_email_change(db, account.email or "", email)
                     account.email = email
                     changed.append("email")
             if request.enrollment_no is not None and isinstance(account, Student):
@@ -712,6 +736,112 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         audit(admin, "delete_resource", f"{title} (#{resource_id})")
         state.bump(TOPIC_RESOURCES)
         return {"ok": True}
+
+    # -- approved emails: who may create an account ----------------------------------------
+
+    def _allowed_overview(role: str) -> dict[str, Any]:
+        try:
+            entries = approvals.list_entries(state.session_factory, role)
+        except approvals.ApprovalError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        registered = sum(1 for e in entries if e["registered"])
+        return {
+            "entries": entries,
+            "counts": {
+                "total": len(entries),
+                "registered": registered,
+                "waiting": len(entries) - registered,
+            },
+        }
+
+    @router.get("/allowed/{role}")
+    def allowed_list(role: str, _: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        return _allowed_overview(role)
+
+    @router.post("/allowed")
+    def allowed_add(
+        request: AllowedRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        try:
+            entry_id = approvals.add_entry(
+                state.session_factory,
+                request.role,
+                name=request.name,
+                email=request.email,
+                enrollment_no=request.enrollment_no,
+            )
+        except approvals.ApprovalError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, "approve_email", f"{request.role} {normalise_email(request.email)}")
+        state.bump(TOPIC_ACCOUNTS)
+        return {"id": entry_id}
+
+    @router.post("/allowed/{entry_id}/update")
+    def allowed_update(
+        entry_id: int, request: AllowedUpdateRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        try:
+            approvals.update_entry(
+                state.session_factory,
+                entry_id,
+                name=request.name,
+                email=request.email,
+                enrollment_no=request.enrollment_no,
+            )
+        except approvals.ApprovalError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, "edit_approved_email", f"entry#{entry_id}")
+        state.bump(TOPIC_ACCOUNTS)
+        return {"ok": True}
+
+    @router.post("/allowed/{entry_id}/delete")
+    def allowed_delete(
+        entry_id: int, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        try:
+            email = approvals.delete_entry(state.session_factory, entry_id)
+        except approvals.ApprovalError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit(admin, "remove_approved_email", email)
+        state.bump(TOPIC_ACCOUNTS)
+        return {"ok": True}
+
+    @router.post("/allowed-import")
+    def allowed_import(
+        request: ImportRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        """Add many approved emails from an uploaded CSV or Excel file."""
+        try:
+            approvals.check_role(request.role)
+            data = base64.b64decode(request.data_base64, validate=True)
+            rows = approval_import.read_rows(request.filename, data, request.role)
+        except (approval_import.UploadError, approvals.ApprovalError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=400, detail="That file couldn't be read.") from None
+        report = approvals.import_entries(state.session_factory, request.role, rows)
+        audit(
+            admin,
+            "import_approved_emails",
+            f"{request.role}: {report.added} added, {len(report.problems)} problems "
+            f"({request.filename})",
+        )
+        state.bump(TOPIC_ACCOUNTS)
+        return {**report.as_dict(), "rows": len(rows)}
+
+    @router.get("/allowed-template/{role}.csv")
+    def allowed_template(role: str, _: _AdminSession = Depends(current_admin)) -> Response:
+        if role not in approval_import.TEMPLATES:
+            raise HTTPException(status_code=404, detail="Unknown role.")
+        return Response(
+            "\ufeff" + approval_import.TEMPLATES[role],
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{role}s-template.csv"'.replace(
+                    "professors", "teachers"
+                )
+            },
+        )
 
     # -- labs -----------------------------------------------------------------------
 

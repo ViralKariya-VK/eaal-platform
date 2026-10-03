@@ -156,6 +156,7 @@ async function showAuth() {
 
 const SECTIONS = [
   ["overview", "Overview", showOverview],
+  ["approved", "Approved emails", showApproved],
   ["users", "Users", showUsers],
   ["labs", "Labs", showLabs],
   ["resources", "Resources", showResources],
@@ -351,6 +352,142 @@ function confirmBox(title, message, label, onYes) {
   );
 }
 
+// -- approved emails (who may create an account) ----------------------------------
+
+let approvedRole = "professor"; // "professor" | "student"
+const ROLE_NAME = { professor: "Teachers", student: "Students" };
+
+function showApproved(quiet) {
+  return guarded(async () => {
+    const data = await get(`/allowed/${approvedRole}`);
+    const isStudent = approvedRole === "student";
+    const c = data.counts;
+    main().innerHTML = `
+      <div class="page-head"><div><h1>Approved emails</h1>
+        <p class="muted">Only people whose email is on these lists can create an account, so CAVY stays limited to your institution. ${isStudent ? "Students" : "Teachers"} not on the list are refused at sign-up.</p></div></div>
+      <div class="toolbar">
+        <button class="${approvedRole === "professor" ? "primary" : ""}" data-role="professor">Teachers</button>
+        <button class="${approvedRole === "student" ? "primary" : ""}" data-role="student">Students</button>
+        <span class="muted" style="margin-left:10px">${c.total} approved · ${c.registered} registered · ${c.waiting} waiting</span>
+        <span style="flex:1"></span>
+        <button id="dlTemplate">Download template</button>
+        <button id="importBtn">Import CSV / Excel</button>
+        <input type="file" id="importFile" accept=".csv,.xlsx,.xlsm,.txt,.tsv" hidden />
+        <button class="primary" id="addOne">Add one</button>
+      </div>
+      <div class="card">${table(
+        isStudent ? ["Name", "Email", "Enrolment", "Status", ""] : ["Name", "Email", "Status", ""],
+        data.entries.map((e) => {
+          const status = e.registered ? '<span class="pill ok">Registered</span>' : '<span class="pill warn">Waiting to sign up</span>';
+          const actions = `<div class="row-actions">${e.registered ? "" : `<button data-edit="${e.id}">Edit</button>`}<button class="danger" data-remove="${e.id}">Remove</button></div>`;
+          return isStudent
+            ? [esc(e.name || ""), esc(e.email), esc(e.enrollment_no || ""), status, actions]
+            : [esc(e.name || ""), esc(e.email), status, actions];
+        }),
+        { empty: `No ${isStudent ? "student" : "teacher"} emails yet. Use “Add one” or import a file.` }
+      )}</div>
+      <p class="muted">A file needs a header row: <code>${isStudent ? "name, email, enrollment_no" : "name, email"}</code>. Extra columns are ignored and the order doesn't matter. Use <b>Download template</b> for an example. Edit a person who has already registered on the Users page.</p>`;
+
+    const byId = Object.fromEntries(data.entries.map((e) => [e.id, e]));
+    main().querySelectorAll("[data-role]").forEach((b) =>
+      b.addEventListener("click", () => { approvedRole = b.dataset.role; showApproved(); })
+    );
+    document.getElementById("addOne").addEventListener("click", () => approvedForm(null));
+    document.getElementById("dlTemplate").addEventListener("click", () =>
+      download(`/allowed-template/${approvedRole}.csv`, `${approvedRole}-template.csv`)
+    );
+    const fileInput = document.getElementById("importFile");
+    document.getElementById("importBtn").addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const text = String(reader.result);
+        try {
+          const report = await post("/allowed-import", {
+            role: approvedRole,
+            filename: file.name,
+            data_base64: text.slice(text.indexOf(",") + 1),
+          });
+          showImportReport(file.name, report);
+        } catch (err) {
+          toast(err.message);
+        }
+        fileInput.value = "";
+      };
+      reader.readAsDataURL(file);
+    });
+    main().querySelectorAll("[data-edit]").forEach((b) =>
+      b.addEventListener("click", () => approvedForm(byId[b.dataset.edit]))
+    );
+    main().querySelectorAll("[data-remove]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const e = byId[b.dataset.remove];
+        confirmBox(
+          `Remove ${e.email}?`,
+          e.registered
+            ? "They have already registered, and their account stays as it is. If you delete their account later they will not be able to sign up again unless you add them back."
+            : "They will no longer be able to create an account with this email.",
+          "Remove",
+          async () => { await post(`/allowed/${e.id}/delete`); toast("Removed."); showApproved(); }
+        );
+      })
+    );
+  });
+}
+
+function approvedForm(existing) {
+  const isStudent = approvedRole === "student";
+  modal(
+    `<h3>${existing ? "Edit" : "Add"} ${isStudent ? "student" : "teacher"} email</h3>
+     <label>Name (optional) <input id="aeName" value="${esc(existing?.name || "")}" /></label>
+     <label>Email <input id="aeEmail" value="${esc(existing?.email || "")}" placeholder="name@university.edu" /></label>
+     ${isStudent ? `<label>Enrolment number (optional) <input id="aeEnrol" value="${esc(existing?.enrollment_no || "")}" /></label>` : ""}
+     <p class="error" id="aeError"></p>
+     <div class="actions"><button id="aeCancel">Cancel</button><button class="primary" id="aeSave">${existing ? "Save" : "Add"}</button></div>`,
+    (o) => {
+      o.querySelector("#aeCancel").addEventListener("click", () => o.remove());
+      const save = async () => {
+        const body = {
+          name: o.querySelector("#aeName").value.trim(),
+          email: o.querySelector("#aeEmail").value.trim(),
+          enrollment_no: isStudent ? o.querySelector("#aeEnrol").value.trim() : null,
+        };
+        try {
+          if (existing) await post(`/allowed/${existing.id}/update`, body);
+          else await post("/allowed", { role: approvedRole, ...body });
+          o.remove();
+          toast(existing ? "Saved." : "Added.");
+          showApproved();
+        } catch (err) {
+          o.querySelector("#aeError").textContent = err.message;
+        }
+      };
+      o.querySelector("#aeSave").addEventListener("click", save);
+      o.querySelector("#aeEmail").addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+    }
+  );
+}
+
+function showImportReport(filename, report) {
+  const problems = report.problems.length
+    ? `<h3 style="margin-top:14px">Rows that were not added (${report.problems.length})</h3>
+       ${table(["Row", "Email", "Why"], report.problems.map((p) => [p.row ?? "", esc(p.email), esc(p.error)]))}`
+    : "";
+  modal(
+    `<h3>Import finished</h3>
+     <p class="muted">${esc(filename)} · ${report.rows} row${report.rows === 1 ? "" : "s"} read</p>
+     <div class="tiles" style="margin:10px 0">
+       <div class="card tile"><div class="num">${report.added}</div><div class="muted">added</div></div>
+       <div class="card tile"><div class="num">${report.already_listed}</div><div class="muted">already on the list</div></div>
+       <div class="card tile"><div class="num">${report.problems.length}</div><div class="muted">not added</div></div>
+     </div>${problems}
+     <div class="actions"><button class="primary" id="irDone">Done</button></div>`,
+    (o) => o.querySelector("#irDone").addEventListener("click", () => { o.remove(); showApproved(); })
+  );
+}
+
 // -- users --------------------------------------------------------------------
 
 function showUsers(quiet) {
@@ -382,7 +519,7 @@ function showUsers(quiet) {
     data.professors.forEach((u) => (byKey[`professor:${u.id}`] = u));
     main().innerHTML = `
       <div class="page-head"><div><h1>Users</h1>
-      <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student is in one teacher's class; only that teacher (or you) can share resources with them or manage them.</p></div>
+      <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student is in one teacher's class; only that teacher (or you) can share resources with them or manage them. Accounts you add here don't need an approved email; people signing up themselves do (see Approved emails).</p></div>
       <button class="primary" id="newUser">Add account</button></div>
       <div class="card"><h3>Professors (${data.professors.length})</h3>
         ${table(["ID", "Name", "Email", "Class", "Shared", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>

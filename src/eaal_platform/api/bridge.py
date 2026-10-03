@@ -49,6 +49,7 @@ from eaal_platform.ai.provider import (
     Purpose,
 )
 from eaal_platform.auth import password_problem
+from eaal_platform.db import approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     authenticate_professor,
@@ -101,6 +102,16 @@ from eaal_platform.signals.compute import compute_all_signals, persist_signal_sc
 
 _ENTRY_FILENAME = "main.py"
 _DISABLED_MESSAGE = "This account has been disabled. Ask your administrator."
+_NOT_APPROVED = {
+    "student": (
+        "This email address hasn't been approved. Use your university email, "
+        "or ask your administrator to add you."
+    ),
+    "professor": (
+        "Teacher accounts are set up by your administrator. "
+        "Ask them to add your email address first."
+    ),
+}
 
 _STAGE_TYPES = (StageType.LEARNING, StageType.EXPLORATION, StageType.ASSESSMENT)
 
@@ -191,6 +202,7 @@ class CavyApi:
         *,
         ai_holder: ProviderHolder | None = None,
         professors_set_ai: bool = False,
+        restrict_signup: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._event_logger = event_logger
@@ -199,6 +211,8 @@ class CavyApi:
         self._ai_holder = ai_holder or ProviderHolder(ai_provider)
         # On the server, only professors may change the class-wide AI backend.
         self._professors_set_ai = professors_set_ai
+        # On a server, only emails an administrator has approved may sign up.
+        self._restrict_signup = restrict_signup
         # Opens the OS "Save as" dialog and returns the chosen path (None if
         # cancelled). Injected by app.py because only the window can show it;
         # the webview can't download files itself.
@@ -267,6 +281,14 @@ class CavyApi:
         problem = password_problem(password)
         if problem:
             return {"ok": False, "error": problem}
+        if role not in ("student", "professor"):
+            raise ValueError(f"Unknown role {role!r}")
+        if self._restrict_signup:
+            approval = approvals.find_approval(self._session_factory, role, email)
+            if approval is None:
+                return {"ok": False, "error": _NOT_APPROVED[role]}
+            enrollment_no = enrollment_no or approval["enrollment_no"]
+            display_name = display_name.strip() or approval["name"] or ""
         try:
             if role == "student":
                 create_student_account(
@@ -276,12 +298,10 @@ class CavyApi:
                     password=password,
                     enrollment_no=enrollment_no,
                 )
-            elif role == "professor":
+            else:
                 create_professor_account(
                     self._session_factory, display_name=display_name, email=email, password=password
                 )
-            else:
-                raise ValueError(f"Unknown role {role!r}")
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}

@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.client.api import ClientApi
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
+from eaal_platform.db import approvals
 from eaal_platform.db.bootstrap import seed_demo_content
 from eaal_platform.db.models import ExecutionResult
 from eaal_platform.events.logger import EventLogger
@@ -27,6 +28,9 @@ def server(
     db_engine: Engine, db_session_factory: sessionmaker[OrmSession]
 ) -> Iterator[tuple[TestClient, ServerState]]:
     seed_demo_content(db_session_factory)
+    # The server only lets approved emails sign up; approve the ones these tests use.
+    approvals.add_entry(db_session_factory, "student", name="Ada", email="ada@example.com")
+    approvals.add_entry(db_session_factory, "professor", name="Dr. K", email="k@example.com")
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
     with TestClient(create_app(state)) as http:
         yield http, state

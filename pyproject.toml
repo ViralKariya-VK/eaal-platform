@@ -50,6 +50,7 @@ pilot = [
 server = [
     "fastapi>=0.115,<1.0",
     "uvicorn>=0.30,<1.0",
+    "openpyxl>=3.1,<4.0",  # reading Excel files of approved emails
 ]
 
 # Building the installers (scripts/build_release.py): PyInstaller bundles the
@@ -100,8 +101,8 @@ strict = false
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-# pyobjc's macOS-only frameworks ship no py.typed marker or stubs.
-module = ["AppKit", "Foundation"]
+# pyobjc's macOS-only frameworks and openpyxl ship no py.typed marker or stubs.
+module = ["AppKit", "Foundation", "openpyxl", "openpyxl.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

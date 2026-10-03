@@ -130,6 +130,7 @@ class ServerState:
             self.event_logger,
             ai_holder=self.ai_holder,
             professors_set_ai=True,
+            restrict_signup=True,
         )
 
     def add_client(

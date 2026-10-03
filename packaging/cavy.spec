@@ -26,6 +26,7 @@ for package in (
     "starlette",
     "pydantic",
     "anyio",
+    "openpyxl",
     "sqlalchemy.dialects.sqlite",
 ):
     hiddenimports += collect_submodules(package)

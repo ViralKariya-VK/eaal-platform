@@ -42,7 +42,8 @@ def test_all_tables_created(db_engine: Engine) -> None:
 def test_every_table_has_synced_at_column(db_engine: Engine) -> None:
     inspector = inspect(db_engine)
     for table_name in inspector.get_table_names():
-        if table_name in ("admins", "audit_log") or table_name.startswith("resource"):
+        server_only = ("admins", "audit_log", "allowed_emails")
+        if table_name in server_only or table_name.startswith("resource"):
             continue  # newer tables: the per-row sync design is no longer used
         columns = {col["name"] for col in inspector.get_columns(table_name)}
         assert "synced_at" in columns, f"{table_name} is missing synced_at"
