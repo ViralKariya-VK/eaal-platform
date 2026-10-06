@@ -80,6 +80,8 @@ from eaal_platform.ai import cloud_providers
 from eaal_platform.db import approval_import, approvals, resources
 from eaal_platform.server import admin, app as server_app, host
 from eaal_platform.client.api import ClientApi
+from eaal_platform.client import lockdown
+from eaal_platform.db import academics
 
 book = Workbook(); sheet = book.active
 sheet.append(["Name", "Email"]); sheet.append(["Ada", "ada@uni.edu"])
@@ -90,6 +92,8 @@ print(json.dumps({
     "excel_rows": len(rows),
     "providers": sorted(cloud_providers.PROVIDERS),
     "student_choices": list(cloud_providers.STUDENT_PROVIDER_KEYS),
+    "lab_lock": lockdown.should_block(0x5B, 0, False, False),
+    "courses": [name for name, _ in academics.SUGGESTED_COURSES],
 }))
 """
 
@@ -120,6 +124,8 @@ def smoke_test(executable: Path) -> None:
         '"sum": 10',
         '"excel_rows": 1',
         '"student_choices": ["gemini", "anthropic", "openai", "xai"]',
+        '"lab_lock": true',
+        '"courses": ["Degree", "Masters", "Engineering"]',
     )
     if done.returncode != 0 or not all(part in done.stdout for part in expected):
         raise SystemExit(
@@ -127,7 +133,7 @@ def smoke_test(executable: Path) -> None:
             f"stdout: {done.stdout}\nstderr: {done.stderr}"
         )
     print("Smoke test passed: the packaged app runs student code and has Excel import,")
-    print("the four AI providers, approved-email rules and the server.")
+    print("the four AI providers, approved-email rules, courses, lab mode and the server.")
 
 
 def make_dmg_background(destination: Path) -> None:

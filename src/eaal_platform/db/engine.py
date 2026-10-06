@@ -86,6 +86,16 @@ _ADDED_COLUMNS = (
     ("students", "disabled", "BOOLEAN NOT NULL DEFAULT 0"),
     ("students", "professor_id", "INTEGER REFERENCES professors(id)"),
     ("professors", "disabled", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("students", "course_id", "INTEGER REFERENCES courses(id)"),
+    ("students", "year", "INTEGER"),
+    ("students", "division", "VARCHAR(50)"),
+    ("students", "batch", "VARCHAR(50)"),
+    ("students", "roll_number", "VARCHAR(50)"),
+    ("tasks", "course_id", "INTEGER REFERENCES courses(id)"),
+    ("tasks", "year", "INTEGER"),
+    ("tasks", "professor_id", "INTEGER REFERENCES professors(id)"),
+    ("sessions", "focus_losses", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "submit_reason", "VARCHAR(50)"),
 )
 
 

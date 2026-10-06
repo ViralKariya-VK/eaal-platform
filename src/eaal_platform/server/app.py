@@ -38,6 +38,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.ai.provider import AIProvider, ProviderHolder
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.db import academics
 from eaal_platform.db.models import AuditLog
 from eaal_platform.events.logger import EventLogger
 
@@ -293,6 +294,11 @@ def create_app(state: ServerState) -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "service": "cavy", "version": API_VERSION}
+
+    @app.get("/api/academic")
+    def academic_options() -> list[dict[str, Any]]:
+        """Courses with their years, divisions and batches (the sign-up form needs them)."""
+        return academics.list_courses(state.session_factory)
 
     def _who(client: _Client) -> str:
         return f"{client.role}:{client.name}"

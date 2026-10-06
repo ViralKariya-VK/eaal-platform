@@ -23,7 +23,10 @@ from eaal_platform.ai.prompt_builder import build_prompt
 from eaal_platform.ai.provider import AIProvider, GenerationContext, GenerationResult, Purpose
 
 _DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
-_DEFAULT_MODEL = "llama-3.3-70b-versatile"
+_DEFAULT_MODEL = "openai/gpt-oss-120b"
+# Groq retires models now and then; if the configured one is gone, use the
+# first of these that the key can see rather than failing every question.
+_FALLBACK_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 _PING_TIMEOUT_SECONDS = 5.0
 
@@ -80,11 +83,10 @@ class GroqProvider(AIProvider):
             payload["response_format"] = {"type": "json_object"}
 
         try:
-            response = self._client.post(
-                "/chat/completions",
-                json=payload,
-                timeout=_DEFAULT_TIMEOUT_SECONDS,
-            )
+            response = self._post_chat(payload)
+            if response.status_code == httpx.codes.NOT_FOUND and self._switch_model():
+                payload["model"] = self._model
+                response = self._post_chat(payload)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             return GenerationResult(text="", available=False, error=str(exc))
@@ -95,6 +97,24 @@ class GroqProvider(AIProvider):
         except (KeyError, IndexError, TypeError):
             return GenerationResult(text="", available=False, error="malformed response from Groq")
         return GenerationResult(text=text, available=True)
+
+    def _post_chat(self, payload: dict[str, object]) -> httpx.Response:
+        return self._client.post(
+            "/chat/completions", json=payload, timeout=_DEFAULT_TIMEOUT_SECONDS
+        )
+
+    def _switch_model(self) -> bool:
+        """Move to a model this key can use, after the current one was refused."""
+        try:
+            listing = self._client.get("/models", timeout=_PING_TIMEOUT_SECONDS).json()
+            available = {m["id"] for m in listing["data"]}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return False
+        for candidate in _FALLBACK_MODELS:
+            if candidate in available and candidate != self._model:
+                self._model = candidate
+                return True
+        return False
 
     @property
     def provider_name(self) -> str:

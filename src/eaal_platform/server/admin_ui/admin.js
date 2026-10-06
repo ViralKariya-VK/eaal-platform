@@ -158,6 +158,7 @@ const SECTIONS = [
   ["overview", "Overview", showOverview],
   ["approved", "Approved emails", showApproved],
   ["users", "Users", showUsers],
+  ["courses", "Courses & classes", showCourses],
   ["labs", "Labs", showLabs],
   ["resources", "Resources", showResources],
   ["database", "Database", showDatabase],
@@ -506,8 +507,8 @@ function showUsers(quiet) {
       u.id,
       esc(u.name),
       esc(u.email),
-      role === "student" ? esc(u.enrollment_no || "") : `${u.students} students`,
-      role === "student" ? teacherSelect(u) : `${u.resources} resources`,
+      role === "student" ? placeText(u) : `${u.students} students · ${u.resources} shared`,
+      role === "student" ? teacherSelect(u) : esc((u.courses || []).join(", ") || "No courses"),
       role === "student" ? u.sessions : "",
       status(u),
       `<div class="row-actions"><button data-edit="${role}:${u.id}">Edit</button> <button data-reset="${role}:${u.id}" data-name="${esc(u.name)}">Reset password</button>
@@ -522,9 +523,9 @@ function showUsers(quiet) {
       <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student is in one teacher's class; only that teacher (or you) can share resources with them or manage them. Accounts you add here don't need an approved email; people signing up themselves do (see Approved emails).</p></div>
       <button class="primary" id="newUser">Add account</button></div>
       <div class="card"><h3>Professors (${data.professors.length})</h3>
-        ${table(["ID", "Name", "Email", "Class", "Shared", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
+        ${table(["ID", "Name", "Email", "Class", "Teaches", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
       <div class="card"><h3>Students (${data.students.length})</h3>
-        ${table(["ID", "Name", "Email", "Enrolment", "Teacher", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
+        ${table(["ID", "Name", "Email", "Course · year · div · batch · roll", "Teacher", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
 
     document.getElementById("newUser").addEventListener("click", () => userForm(null));
     main().querySelectorAll("[data-assign]").forEach((select) =>
@@ -587,14 +588,69 @@ function showUsers(quiet) {
   });
 }
 
-function userForm(existing) {
+function placeText(u) {
+  if (!u.course) return `<span class="muted">${esc(u.roll_number ? "Roll " + u.roll_number : "No course set")}</span>`;
+  return esc([u.course, u.year_label, u.division && "Div " + u.division, u.batch && "Batch " + u.batch, u.roll_number && "Roll " + u.roll_number].filter(Boolean).join(" · "));
+}
+
+// The course / year / division / batch / roll number fields, filled from the course list.
+function placeFields(courses, current = {}) {
+  const options = (items, selected, blank) =>
+    `<option value="">${esc(blank)}</option>` + items.map((i) => `<option value="${esc(i.value)}" ${String(i.value) === String(selected ?? "") ? "selected" : ""}>${esc(i.label)}</option>`).join("");
+  return `
+    <label>Course <select id="pCourse">${options(courses.map((c) => ({ value: c.id, label: c.name })), current.course_id, "No course")}</select></label>
+    <div class="cols2">
+      <label>Year <select id="pYear"></select></label>
+      <label>Roll number <input id="pRoll" value="${esc(current.roll_number || "")}" /></label>
+    </div>
+    <div class="cols2">
+      <label>Division <select id="pDivision"></select></label>
+      <label>Batch <select id="pBatch"></select></label>
+    </div>`;
+}
+
+function bindPlaceFields(root, courses, current = {}) {
+  const sync = (keep) => {
+    const course = courses.find((c) => String(c.id) === root.querySelector("#pCourse").value);
+    const fill = (id, items, selected, blank) => {
+      root.querySelector(id).innerHTML =
+        `<option value="">${esc(blank)}</option>` + items.map((i) => `<option value="${esc(i.value)}" ${String(i.value) === String(selected ?? "") ? "selected" : ""}>${esc(i.label)}</option>`).join("");
+      root.querySelector(id).disabled = !course;
+    };
+    fill("#pYear", course ? course.year_options : [], keep ? current.year : "", "Year");
+    fill("#pDivision", course ? course.divisions.map((d) => ({ value: d.name, label: d.name })) : [], keep ? current.division : "", "Division");
+    fill("#pBatch", course ? course.batches.map((b) => ({ value: b.name, label: b.name })) : [], keep ? current.batch : "", "Batch");
+  };
+  root.querySelector("#pCourse").addEventListener("change", () => sync(false));
+  sync(true);
+}
+
+function readPlace(root) {
+  const val = (id) => root.querySelector(id).value.trim();
+  return {
+    course_id: val("#pCourse") ? Number(val("#pCourse")) : null,
+    year: val("#pYear") ? Number(val("#pYear")) : null,
+    division: val("#pDivision") || null,
+    batch: val("#pBatch") || null,
+    roll_number: val("#pRoll") || null,
+  };
+}
+
+async function userForm(existing) {
   const creating = !existing;
+  let courses = [];
+  try {
+    courses = (await get("/courses")).courses;
+  } catch {
+    /* the form still works without the course lists */
+  }
   modal(
     `<h3>${creating ? "Add account" : "Edit " + esc(existing.name)}</h3>
      ${creating ? `<label>Role <select id="uRole"><option value="student">Student</option><option value="professor">Professor</option></select></label>` : ""}
      <label>Name <input id="uName" value="${esc(existing?.name || "")}" /></label>
      <label>Email <input id="uEmail" value="${esc(existing?.email || "")}" /></label>
-     <div id="enrolRow"><label>Enrolment number <input id="uEnrol" value="${esc(existing?.enrollment_no || "")}" /></label></div>
+     <div id="enrolRow"><label>Enrolment number <input id="uEnrol" value="${esc(existing?.enrollment_no || "")}" /></label>
+       ${courses.length ? placeFields(courses, existing || {}) : ""}</div>
      <label>${creating ? "Password" : "New password (leave empty to keep the current one)"} <input id="uPass" type="text" autocomplete="off" placeholder="at least 8 characters" /></label>
      ${creating ? "" : `<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="uMust" style="width:auto" checked /> Ask them to choose their own password at next sign-in</label>`}
      <p class="error" id="uError"></p>
@@ -604,15 +660,19 @@ function userForm(existing) {
       const syncRole = () => (o.querySelector("#enrolRow").style.display = role() === "student" ? "" : "none");
       if (creating) o.querySelector("#uRole").addEventListener("change", syncRole);
       syncRole();
+      if (courses.length) bindPlaceFields(o, courses, existing || {});
       o.querySelector("#cancel").addEventListener("click", () => o.remove());
       o.querySelector("#save").addEventListener("click", async () => {
         const v = (id) => o.querySelector(id).value.trim();
         try {
           if (creating) {
-            await post("/users/create", { role: role(), name: v("#uName"), email: v("#uEmail"), password: o.querySelector("#uPass").value, enrollment_no: v("#uEnrol") || null });
+            await post("/users/create", { role: role(), name: v("#uName"), email: v("#uEmail"), password: o.querySelector("#uPass").value, enrollment_no: v("#uEnrol") || null, cohort: role() === "student" && courses.length ? readPlace(o) : null });
           } else {
             const body = { role: role(), id: existing.id, name: v("#uName"), email: v("#uEmail") };
-            if (role() === "student") body.enrollment_no = v("#uEnrol");
+            if (role() === "student") {
+              body.enrollment_no = v("#uEnrol");
+              if (courses.length) body.cohort = readPlace(o);
+            }
             const pass = o.querySelector("#uPass").value;
             if (pass) {
               body.new_password = pass;
@@ -629,6 +689,125 @@ function userForm(existing) {
       });
     }
   );
+}
+
+// -- courses & classes ----------------------------------------------------------
+
+function showCourses(quiet) {
+  return guarded(async () => {
+    const data = await get("/courses");
+    const chip = (text, attrs) => `<span class="chip">${esc(text)} <button class="chip-x" ${attrs} title="Remove">&times;</button></span>`;
+    const card = (c) => {
+      const free = data.professors.filter((p) => !c.professors.some((t) => t.id === p.id));
+      return `
+        <div class="card course-card" data-course="${c.id}">
+          <div class="page-head" style="margin:0 0 8px">
+            <div><h3 style="margin:0">${esc(c.name)}</h3>
+              <p class="muted">${c.years} year${c.years === 1 ? "" : "s"} (${esc(c.year_options.map((y) => y.label).join(", "))}) · ${c.students} student${c.students === 1 ? "" : "s"}</p></div>
+            <div class="row-actions"><button data-edit-course="${c.id}">Edit</button><button class="danger" data-delete-course="${c.id}" data-name="${esc(c.name)}">Delete</button></div>
+          </div>
+          <div class="cols2">
+            <div><h4>Divisions</h4>
+              <div class="chips">${c.divisions.map((d) => chip(d.name, `data-remove-option="${d.id}"`)).join("") || '<span class="muted">None yet. Students will not be asked for a division.</span>'}</div>
+              <div class="inline-add"><input data-new-division="${c.id}" placeholder="e.g. A" /><button data-add-option="${c.id}:division">Add</button></div></div>
+            <div><h4>Batches</h4>
+              <div class="chips">${c.batches.map((b) => chip(b.name, `data-remove-option="${b.id}"`)).join("") || '<span class="muted">None yet. Students will not be asked for a batch.</span>'}</div>
+              <div class="inline-add"><input data-new-batch="${c.id}" placeholder="e.g. A1" /><button data-add-option="${c.id}:batch">Add</button></div></div>
+          </div>
+          <h4 style="margin-top:14px">Professors who teach it</h4>
+          <div class="chips">${c.professors.map((p) => chip(p.name, `data-unteach="${c.id}:${p.id}"`)).join("") || '<span class="muted">Nobody yet. A professor can only add students and aim labs at courses assigned here.</span>'}</div>
+          <div class="inline-add"><select data-teach-select="${c.id}"><option value="">Assign a professor…</option>${free.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select><button data-teach="${c.id}">Assign</button></div>
+        </div>`;
+    };
+    main().innerHTML = `
+      <div class="page-head"><div><h1>Courses &amp; classes</h1>
+        <p class="muted">The lists students choose from when they sign up: a course has a number of years (a degree 3, a master's 2, engineering 4), plus the divisions and batches you allow. Assign professors to courses here; a professor can then take whole groups (course, year, division, batch) into their class and aim labs at them.</p></div></div>
+      <div class="card"><h3>Add a course</h3>
+        <div class="inline-add"><input id="newCourseName" placeholder="Course name, e.g. B.Sc. Data Science" /><input id="newCourseYears" type="number" min="1" max="6" value="3" style="max-width:90px" title="Years" />
+        <button class="primary" id="addCourse">Add course</button>
+        <button id="addSuggested">Add Degree (3), Masters (2), Engineering (4)</button></div></div>
+      ${data.courses.length ? data.courses.map(card).join("") : '<div class="card"><p class="muted">No courses yet. Until you add one, students are not asked for a course when they sign up.</p></div>'}`;
+
+    const run = async (work, message) => {
+      try {
+        await work();
+        if (message) toast(message);
+      } catch (err) {
+        toast(err.message);
+      }
+      showCourses(true);
+    };
+    document.getElementById("addCourse").addEventListener("click", () =>
+      run(() => post("/courses/add", { name: document.getElementById("newCourseName").value, years: Number(document.getElementById("newCourseYears").value) }), "Course added.")
+    );
+    document.getElementById("addSuggested").addEventListener("click", () => run(async () => {
+      const r = await post("/courses/add-suggested");
+      toast(r.result ? `${r.result} course${r.result === 1 ? "" : "s"} added.` : "Those are already there.");
+    }));
+    main().querySelectorAll("[data-add-option]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const [id, kind] = b.dataset.addOption.split(":");
+        const input = main().querySelector(`[data-new-${kind}="${id}"]`);
+        run(() => post("/courses/options/add", { course_id: Number(id), kind, name: input.value }));
+      })
+    );
+    main().querySelectorAll("[data-remove-option]").forEach((b) =>
+      b.addEventListener("click", () => run(() => post("/courses/options/remove", { id: Number(b.dataset.removeOption) })))
+    );
+    const teaching = (courseId) => data.courses.find((c) => c.id === courseId).professors.map((p) => p.id);
+    main().querySelectorAll("[data-teach]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const courseId = Number(b.dataset.teach);
+        const select = main().querySelector(`[data-teach-select="${courseId}"]`);
+        if (!select.value) return toast("Choose a professor first.");
+        const professorId = Number(select.value);
+        const have = data.courses.filter((c) => c.professors.some((p) => p.id === professorId)).map((c) => c.id);
+        run(() => post("/courses/professors", { professor_id: professorId, course_ids: [...have, courseId] }), "Professor assigned.");
+      })
+    );
+    main().querySelectorAll("[data-unteach]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const [courseId, professorId] = b.dataset.unteach.split(":").map(Number);
+        const have = data.courses.filter((c) => c.professors.some((p) => p.id === professorId)).map((c) => c.id);
+        run(() => post("/courses/professors", { professor_id: professorId, course_ids: have.filter((id) => id !== courseId) }), "Removed.");
+      })
+    );
+    main().querySelectorAll("[data-edit-course]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const c = data.courses.find((x) => x.id === Number(b.dataset.editCourse));
+        modal(
+          `<h3>Edit ${esc(c.name)}</h3>
+           <label>Name <input id="cName" value="${esc(c.name)}" /></label>
+           <label>Years <input id="cYears" type="number" min="1" max="6" value="${c.years}" /></label>
+           <p class="error" id="cError"></p>
+           <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="save">Save</button></div>`,
+          (o) => {
+            o.querySelector("#cancel").addEventListener("click", () => o.remove());
+            o.querySelector("#save").addEventListener("click", async () => {
+              try {
+                await post("/courses/update", { id: c.id, name: o.querySelector("#cName").value, years: Number(o.querySelector("#cYears").value) });
+                o.remove();
+                toast("Saved.");
+                showCourses(true);
+              } catch (err) {
+                o.querySelector("#cError").textContent = err.message;
+              }
+            });
+          }
+        );
+      })
+    );
+    main().querySelectorAll("[data-delete-course]").forEach((b) =>
+      b.addEventListener("click", () =>
+        confirmBox(`Delete ${b.dataset.name}?`, "Its divisions, batches and professor assignments go with it. A course that students or labs still use can't be deleted.", "Delete course", async () => {
+          await post("/courses/delete", { id: Number(b.dataset.deleteCourse) });
+          toast("Course deleted.");
+          showCourses(true);
+        })
+      )
+    );
+    // (No auto-refresh here: it would redraw over a half-typed name.)
+  });
 }
 
 // -- labs ---------------------------------------------------------------------
@@ -797,6 +976,9 @@ async function loadTable(tables) {
 // -- one session --------------------------------------------------------------
 
 function showSession(id) {
+  // A drill-down from a live page: stop that page's auto-refresh, which would
+  // otherwise redraw the overview over this view a few seconds later.
+  clearInterval(refreshTimer);
   return guarded(async () => {
     const d = await get(`/sessions/${id}`);
     const s = d.session;

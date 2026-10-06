@@ -114,7 +114,14 @@ computers talk to each other.
      *Registered*. You can edit or remove waiting entries; edit registered
      people on the **Users** page, where you can also add, edit, disable or
      delete any account directly.
-6. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
+6. **Set up courses** (new). In **Courses & classes**, click **Add Degree (3),
+   Masters (2), Engineering (4)** or add your own course with its number of
+   years. For each course add the **divisions** and **batches** students may
+   pick (a course with none simply isn't asked). Then **assign professors** to
+   the courses they teach. Students choose their course, year, division, batch
+   and roll number from these lists when they sign up; a professor can only add
+   students and aim labs at courses assigned to them.
+7. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
    (OpenAI, Claude, Gemini, Grok, Groq or Ollama), paste a key, press **Check key**,
    choose a model, **Connect**. It is used to score sessions and for chat by
    students who haven't connected their own.
@@ -135,6 +142,11 @@ press **Connect**. The login screen now says *Connected to …*. It remembers
 this.
 
 - **PC 2:** *Create an account* → **Teacher**, using an email the admin approved.
+  Then open **My Class**: choose a course (and optionally year, division,
+  batch) and **Add this group to my class**. Everyone in it who has no class
+  joins yours, and so does anyone from that group who signs up later.
+  **My Labs → Create New Session** has a Course / Year / Division / Batch
+  picker: only those students get that lab.
 - **PC 3 and PC 4:** *Create an account* → **Student**, using approved student emails.
 
 Sign-up is refused with a clear message for any email that isn't on the
@@ -189,6 +201,36 @@ configured, so student work can't get stranded on one PC.
 
 ---
 
+## 5b. Lab mode (while a student is taking a lab)
+
+Starting a lab asks the student to confirm, then:
+
+- The window goes **full screen**. On macOS the Dock, menu bar, Cmd+Tab and the
+  Force Quit panel are switched off; on Windows a keyboard hook swallows Alt+Tab,
+  Alt+Esc, Alt+F4, Ctrl+Esc and the Windows keys. Neither needs a permission
+  prompt or administrator rights, and everything is undone when the lab ends,
+  the student signs out or the app closes.
+- If the window **loses focus** (any way of leaving it) the student sees a
+  warning the first time. The **second** time the whole lab is **submitted
+  automatically** with the work saved so far; stages not yet reached are
+  submitted empty. The count is kept on the server for the whole lab, so
+  reopening a stage doesn't reset it. Practice is never locked.
+- Everything **pasted or dragged into the editor** is recorded. The server
+  compares it with what the AI assistant wrote for that student, so the
+  professor sees "pasted 2x from the AI" separately from "pasted from elsewhere".
+- The professor's lab report marks automatic submissions, and a student's work
+  page shows the departures and pastes per stage.
+
+Honest limits: no operating system lets an ordinary app block *everything*
+(Ctrl+Alt+Del on Windows, some trackpad gestures on macOS), so the focus count
+is the safety net. Opening a file or link resource from inside a lab leaves
+CAVY on purpose, so the check pauses for a minute; prefer written instructions
+for labs. Ctrl+Shift+Esc (Task Manager) is deliberately left working as the way
+out if the app ever hangs. To turn lab mode off while developing, set
+`CAVY_NO_LOCKDOWN=1`.
+
+---
+
 ## 6. What the admin can do
 
 | Need | Where |
@@ -223,6 +265,7 @@ resetting their password signs them out immediately.
 |---|---|
 | Where is the server's data? | Shown in the "hosting" box. Mac: `~/Library/Application Support/CAVY/server.db`; Windows: `%APPDATA%\CAVY\server.db` |
 | Back up | Admin panel → Backup (works while running) |
+| Forgot the admin password | On the server PC, in a terminal: `scripts/run-server.sh --reset-admin-password` (Windows: `run-server.bat`; installed app: `CAVY --cavy-serve --reset-admin-password`). It prints a new random password once and exits; add the admin's email after the flag if there are several admins. Works while the server runs. |
 | Start completely fresh | Close CAVY, delete `server.db` (and its `-wal`/`-shm` files), start again, create the admin again |
 | Server restarted | Everyone is returned to the login screen with a "session expired" message and signs in again. No data is lost |
 | Change the port | The "Host a server" box has a Port field |

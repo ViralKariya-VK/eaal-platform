@@ -2,9 +2,11 @@
 
 Separated from ``bootstrap.py`` (which creates rows) and from the screens
 (which shouldn't embed raw queries) so the unlock rule lives in exactly one
-place: a stage is unlocked once the *previous* stage has at least one
-submitted session. If that rule ever needs to change (e.g. requiring a
-minimum score, not just a submission), this is the only place to change it.
+place: a stage is unlocked once the student has *started* the previous stage.
+A lab is submitted once, at the end of its last stage (``submit_session``
+sweeps up the earlier stages), so earlier stages are not "submitted" while the
+student is still moving through them. If the rule ever needs to change (e.g.
+requiring a score), this is the only place to change it.
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ def is_stage_unlocked(
     """Whether ``student_id`` may start ``stage``.
 
     The first stage (``order_index == 0``) is always unlocked. Any later
-    stage requires a submitted session for the stage immediately before it.
+    stage requires a session (started, whether or not submitted yet) for the
+    stage immediately before it.
     """
     if stage.order_index == 0:
         return True
@@ -37,16 +40,26 @@ def is_stage_unlocked(
             # than permanently locking the student out over a data gap.
             return True
 
-        submitted = (
+        started = (
             db_session.query(Session)
-            .filter(
-                Session.student_id == student_id,
-                Session.stage_id == previous_stage.id,
-                Session.submitted_at.is_not(None),
-            )
+            .filter(Session.student_id == student_id, Session.stage_id == previous_stage.id)
             .first()
         )
-        return submitted is not None
+        return started is not None
+
+
+def stage_status(session_factory: sessionmaker[OrmSession], student_id: int, stage_id: int) -> str:
+    """``"submitted"``, ``"in_progress"`` or ``"not_started"`` for the latest attempt."""
+    with session_factory() as db_session:
+        latest = (
+            db_session.query(Session)
+            .filter(Session.student_id == student_id, Session.stage_id == stage_id)
+            .order_by(Session.id.desc())
+            .first()
+        )
+        if latest is None:
+            return "not_started"
+        return "submitted" if latest.submitted_at is not None else "in_progress"
 
 
 def has_submitted_stage(

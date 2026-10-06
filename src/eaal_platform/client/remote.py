@@ -97,6 +97,19 @@ class RemoteBackend:
         result: dict[str, Any] = response.json()["result"]
         return result
 
+    def get_academic_options(self) -> list[dict[str, Any]]:
+        """The sign-up form's dropdown lists (needs no sign-in)."""
+        try:
+            response = self._http.get(f"{self.base_url}/api/academic")
+        except httpx.HTTPError as exc:
+            raise ServerUnreachableError(
+                f"Can't reach the CAVY server at {self.base_url}."
+            ) from exc
+        if response.status_code != 200:
+            raise ValueError(self._error_message(response))
+        options: list[dict[str, Any]] = response.json()
+        return options
+
     def call(self, method: str, *args: Any) -> Any:
         response = self._post(f"/api/call/{method}", {"args": list(args)})
         self._raise_if_signed_out(response)

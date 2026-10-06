@@ -27,6 +27,7 @@ import httpx
 from eaal_platform.ai import cloud_providers
 from eaal_platform.ai.provider import AIProvider, GenerationContext, Purpose
 from eaal_platform.api.bridge import CavyApi, save_text_file
+from eaal_platform.client.lockdown import LabLock
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
 from eaal_platform.client.settings import load_server_url, normalise_url, save_server_url
 from eaal_platform.db.resources import clean_filename
@@ -48,6 +49,8 @@ _HANDLED_HERE = frozenset(
         "login",
         "logout",
         "create_account",
+        "enter_lab_mode",
+        "leave_lab_mode",
         "get_ai_settings",
         "set_ai_provider",
         "send_ai_message",
@@ -64,8 +67,11 @@ class ClientApi:
         save_file_dialog: Callable[[str], str | None] | None = None,
         server_url: str | None = None,
         ai_http: httpx.Client | None = None,
+        lab_lock: LabLock | None = None,
     ) -> None:
         self._local = local_api
+        # Full screen and key blocking while a lab is being taken (this computer only).
+        self._lab_lock = lab_lock or LabLock()
         # A student's own AI (provider, model and key). It lives only here, in this
         # computer's memory, never reaches the server, and is dropped on sign-out.
         self._personal: AIProvider | None = None
@@ -95,6 +101,7 @@ class ClientApi:
         """Connect to a server, or (blank address) go back to this computer's own data."""
         self._personal = None
         self._role = None
+        self._lab_lock.release()
         if self._backend is not self._local:
             self._backend.logout()
         else:
@@ -265,7 +272,16 @@ class ClientApi:
 
     def shutdown(self) -> None:
         """Called when the app window closes."""
+        self._lab_lock.release()
         self._host.stop()
+
+    def enter_lab_mode(self) -> dict[str, Any]:
+        """A lab is starting: go full screen and block the ways of switching away."""
+        return {"ok": True, **self._lab_lock.engage()}
+
+    def leave_lab_mode(self) -> dict[str, Any]:
+        self._lab_lock.release()
+        return {"ok": True}
 
     # -- calls handled here -------------------------------------------------
 
@@ -276,6 +292,7 @@ class ClientApi:
         return result
 
     def logout(self) -> None:
+        self._lab_lock.release()
         self._personal = None
         self._role = None
         self._backend.logout()

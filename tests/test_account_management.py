@@ -196,6 +196,13 @@ def test_roster_lists_students_alphabetically(api: CavyApi) -> None:
             "must_change_password",
             "professor_id",
             "professor_name",
+            "course",
+            "course_id",
+            "year",
+            "year_label",
+            "division",
+            "batch",
+            "roll_number",
         }
         for entry in roster
     )
@@ -209,6 +216,12 @@ def test_get_profile(api: CavyApi) -> None:
         "email": "asha@example.com",
         "enrollment_no": "BSC1",
         "must_change_password": False,
+        "course": None,
+        "year": None,
+        "year_label": "",
+        "division": None,
+        "batch": None,
+        "roll_number": None,
     }
     api.login("professor", "prof@example.com", _OLD)
     assert api.get_profile()["role"] == "professor"

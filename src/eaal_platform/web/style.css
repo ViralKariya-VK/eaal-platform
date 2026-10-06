@@ -1836,3 +1836,259 @@ textarea {
   gap: 4px;
   max-height: 130px;
 }
+
+/* -- Coding screen: stage navigation and resources -------------------------- */
+.stage-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.stage-hint {
+  margin: 4px 0 18px;
+  font-size: 13px;
+}
+.session-resources {
+  padding: 0 6px 12px;
+}
+.session-resources .muted {
+  color: var(--text-muted-on-navy);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.resource-group {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted-on-navy);
+  padding: 8px 8px 4px;
+}
+.resource-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--text-on-navy);
+  padding: 6px 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.resource-item:hover {
+  background: var(--navy-700);
+}
+.resource-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-resources .resource-list li {
+  padding: 0;
+}
+
+/* -- Course / year / division / batch pickers --------------------------------- */
+[hidden] {
+  display: none !important;
+}
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.group-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.group-form select {
+  width: 100%;
+}
+.group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.group-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+#cohortFields {
+  display: grid;
+  gap: 14px;
+}
+.lab-submitted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+}
+.lab-submitted .icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+}
+
+/* -- Professor: class tree, student work -------------------------------------- */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--teal-text, #0f766e);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.ciq-pill {
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--teal-bg, #d9f0ea);
+  color: var(--teal-text, #0f766e);
+  font-weight: 700;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.tree-node {
+  margin: 0 0 14px;
+}
+.tree-node > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 2px;
+}
+.tree-node > summary::-webkit-details-marker {
+  display: none;
+}
+.tree-course {
+  font-family: Lora, Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  border-bottom: 2px solid var(--line, #e4dccb);
+}
+.tree-year {
+  font-size: 15px;
+  font-weight: 600;
+}
+.tree-child {
+  margin-left: 18px;
+}
+.tree-group {
+  margin: 4px 0 10px 18px;
+}
+.tree-group-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 8px 0 6px;
+}
+.tree-table {
+  padding: 0;
+  overflow: hidden;
+}
+.stage-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+.stage-tab {
+  background: var(--cream-100, #f3ecdc);
+  border: 1px solid var(--line, #e4dccb);
+  border-radius: var(--radius-pill, 999px);
+  padding: 6px 16px;
+  cursor: pointer;
+}
+.stage-tab.active {
+  background: var(--navy-900, #0f1b2e);
+  color: #fff;
+  border-color: var(--navy-900, #0f1b2e);
+}
+.work-meta {
+  margin: 0 0 10px;
+}
+.work-file {
+  margin: 0 0 12px;
+  padding: 0;
+  overflow: hidden;
+}
+.work-file-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.work-file-name .icon {
+  width: 14px;
+  height: 14px;
+}
+.code-view {
+  margin: 8px 0 0;
+  padding: 14px;
+  background: #1b2133;
+  color: #e6ebf5;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow: auto;
+  max-height: 460px;
+  white-space: pre;
+}
+.work-output {
+  padding: 0;
+  overflow: hidden;
+  margin: 0 0 12px;
+}
+.work-output .muted {
+  padding: 8px 14px 14px;
+}
+.output-view {
+  background: #11161f;
+}
+.output-error {
+  color: #ff9b8f;
+}
+.ai-draft-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 10px;
+  flex-wrap: wrap;
+}
+.followup-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.followup-summary-card .spacer {
+  flex: 1;
+}
+.paste-flag {
+  color: var(--amber-text, #8a5a00);
+  font-weight: 600;
+}
+.report-note {
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+.lab-alert {
+  z-index: 10000;
+}

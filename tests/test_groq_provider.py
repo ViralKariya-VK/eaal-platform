@@ -187,3 +187,23 @@ def test_diagnose_never_leaks_the_key() -> None:
         client=_client_with_handler(lambda request: httpx.Response(401)),
     )
     assert "test-key" not in (provider.diagnose() or "")
+
+
+def test_a_retired_model_falls_back_to_one_the_key_can_use() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "openai/gpt-oss-20b"}]})
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model != "openai/gpt-oss-20b":
+            return httpx.Response(404, json={"error": {"code": "model_not_found"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
+
+    client = httpx.Client(base_url="https://x/v1", transport=httpx.MockTransport(handler))
+    provider = GroqProvider(api_key="k", model="gone-model", client=client)
+    result = provider.generate("hello", GenerationContext(), Purpose.CHAT)
+    assert result.available and result.text == "hi"
+    assert seen == ["gone-model", "openai/gpt-oss-20b"]
+    assert provider.model_name == "openai/gpt-oss-20b"

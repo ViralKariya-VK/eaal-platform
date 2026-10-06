@@ -18,6 +18,7 @@ via ``start_stage_session`` / ``start_practice_session`` — never eagerly.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session as OrmSession
@@ -29,9 +30,12 @@ from eaal_platform.auth import (
     password_problem,
     verify_password,
 )
+from eaal_platform.db.academics import assign_by_groups
 from eaal_platform.db.models import (
+    Admin,
     AIAssistanceMode,
     AssessmentKind,
+    AuditLog,
     Professor,
     Session,
     Stage,
@@ -73,8 +77,13 @@ def create_student_account(
     email: str,
     password: str,
     enrollment_no: str | None = None,
+    cohort: dict[str, Any] | None = None,
 ) -> int:
     """Create a new local Student account and return its id.
+
+    ``cohort`` (already checked by ``academics.signup_cohort``) is the
+    student's course, year, division, batch and roll number. A student whose
+    place matches a group some professor has taken is put in that class.
 
     Raises ``ValueError`` if the email is already registered (as either a
     student or a professor — one email shouldn't silently work for both
@@ -89,9 +98,18 @@ def create_student_account(
             password_hash=hash_password(password),
             enrollment_no=enrollment_no,
         )
+        if cohort:
+            student.course_id = cohort["course_id"]
+            student.year = cohort["year"]
+            student.division = cohort["division"]
+            student.batch = cohort["batch"]
+            student.roll_number = cohort["roll_number"]
         db_session.add(student)
         db_session.commit()
-        return student.id
+        new_id = student.id
+    if cohort:
+        assign_by_groups(session_factory, new_id)
+    return new_id
 
 
 def create_professor_account(
@@ -202,6 +220,9 @@ def create_lab(
     division: str | None,
     batch: str | None,
     stage_plan: tuple[tuple[StageType, AIAssistanceMode, int | None], ...],
+    course_id: int | None = None,
+    year: int | None = None,
+    professor_id: int | None = None,
 ) -> int:
     """Create a professor-authored Lab (a Task with three Stages) and return its id.
 
@@ -220,6 +241,9 @@ def create_lab(
             course=course,
             division=division,
             batch=batch,
+            course_id=course_id,
+            year=year,
+            professor_id=professor_id,
         )
         db_session.add(task)
         db_session.flush()
@@ -268,6 +292,9 @@ def create_followup_assessment(
             course=source.course,
             division=source.division,
             batch=source.batch,
+            course_id=source.course_id,
+            year=source.year,
+            professor_id=source.professor_id,
             linked_task_id=source_task_id,
             assessment_kind=kind,
         )
@@ -284,6 +311,35 @@ def create_followup_assessment(
         )
         db_session.commit()
         return task.id
+
+
+def update_followup_assessment(
+    session_factory: sessionmaker[OrmSession],
+    task_id: int,
+    *,
+    title: str,
+    description: str | None,
+    ai_assistance_mode: AIAssistanceMode,
+    duration_minutes: int | None,
+) -> None:
+    """Edit a Transfer Task or Retention Check. As with a lab, the AI mode is
+    locked once any student has started it (their recorded evidence was gathered
+    under that mode); the title, problem and time stay editable."""
+    with session_factory() as db_session:
+        task = db_session.get(Task, task_id)
+        if task is None or task.assessment_kind is None or not task.stages:
+            raise ValueError("That isn't a follow-up assessment.")
+        stage = task.stages[0]
+        if ai_assistance_mode != stage.ai_assistance_mode:
+            if db_session.query(Session).filter_by(stage_id=stage.id).first() is not None:
+                raise ValueError(
+                    "The AI mode can't be changed because students have already started it."
+                )
+            stage.ai_assistance_mode = ai_assistance_mode
+        stage.duration_minutes = duration_minutes
+        task.title = title
+        task.description = description
+        db_session.commit()
 
 
 def start_practice_session(session_factory: sessionmaker[OrmSession], student_id: int) -> int:
@@ -310,6 +366,31 @@ def start_stage_session(
         return session.id
 
 
+def resume_or_start_stage_session(
+    session_factory: sessionmaker[OrmSession], student_id: int, stage_id: int
+) -> tuple[int, bool]:
+    """Open the student's unfinished attempt at ``stage_id``, or start a new one.
+
+    Moving back and forth between a lab's stages must not throw away the
+    work, so an attempt that hasn't been submitted yet is picked up again.
+    Returns ``(session_id, resumed)``.
+    """
+    with session_factory() as db_session:
+        open_attempt = (
+            db_session.query(Session)
+            .filter(
+                Session.student_id == student_id,
+                Session.stage_id == stage_id,
+                Session.submitted_at.is_(None),
+            )
+            .order_by(Session.id.desc())
+            .first()
+        )
+        if open_attempt is not None:
+            return open_attempt.id, True
+    return start_stage_session(session_factory, student_id, stage_id), False
+
+
 def update_lab(
     session_factory: sessionmaker[OrmSession],
     task_id: int,
@@ -322,6 +403,9 @@ def update_lab(
     division: str | None,
     batch: str | None,
     stage_plan: tuple[tuple[AIAssistanceMode, int | None], ...],
+    retarget: bool = False,
+    course_id: int | None = None,
+    year: int | None = None,
 ) -> None:
     """Edit a Lab's details and its stages' AI mode / duration, in place.
 
@@ -360,10 +444,16 @@ def update_lab(
         task.course = course
         task.division = division
         task.batch = batch
+        if retarget:
+            task.course_id = course_id
+            task.year = year
         for followup in db_session.query(Task).filter_by(linked_task_id=task_id):
             followup.course = course
             followup.division = division
             followup.batch = batch
+            if retarget:
+                followup.course_id = course_id
+                followup.year = year
             followup.learning_objective = learning_objective
         db_session.commit()
 
@@ -415,6 +505,43 @@ def change_password(
         account.password_hash = hash_password(new_password)
         account.must_change_password = False
         db_session.commit()
+
+
+def reset_admin_password(
+    session_factory: sessionmaker[OrmSession], email: str | None = None
+) -> tuple[str, str]:
+    """Give an administrator a new random password; returns ``(email, password)``.
+
+    Meant for the server's own command line (the person with access to the
+    machine), for when the only admin has forgotten their password. With no
+    ``email`` it works only if there is exactly one admin.
+    """
+    with session_factory() as db_session:
+        admins = db_session.query(Admin).order_by(Admin.id).all()
+        if not admins:
+            raise ValueError("There is no administrator yet. Open the admin panel to create one.")
+        if email is None:
+            if len(admins) > 1:
+                known = ", ".join(a.email for a in admins)
+                raise ValueError(f"There are several administrators; say which one: {known}")
+            admin = admins[0]
+        else:
+            matches = [a for a in admins if a.email == normalise_email(email)]
+            if not matches:
+                known = ", ".join(a.email for a in admins)
+                raise ValueError(f"No administrator with that email. Known: {known}")
+            admin = matches[0]
+        new_password = generate_temporary_password(12)
+        admin.password_hash = hash_password(new_password)
+        db_session.add(
+            AuditLog(
+                actor="server-console",
+                action="reset admin password",
+                detail=admin.email,
+            )
+        )
+        db_session.commit()
+        return admin.email, new_password
 
 
 def reset_professor_password(session_factory: sessionmaker[OrmSession], professor_id: int) -> str:

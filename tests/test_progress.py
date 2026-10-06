@@ -40,7 +40,7 @@ def test_first_stage_always_unlocked(db_session_factory: sessionmaker[OrmSession
     assert is_stage_unlocked(db_session_factory, student_id, stages[0]) is True
 
 
-def test_second_stage_locked_until_first_is_submitted(
+def test_second_stage_unlocks_once_the_first_is_started(
     db_session_factory: sessionmaker[OrmSession],
 ) -> None:
     seed_demo_content(db_session_factory)
@@ -49,8 +49,10 @@ def test_second_stage_locked_until_first_is_submitted(
 
     assert is_stage_unlocked(db_session_factory, student_id, stages[1]) is False
 
+    # The lab is submitted once at the end, so starting a stage is enough.
     start_stage_session(db_session_factory, student_id, stages[0].id)
-    assert is_stage_unlocked(db_session_factory, student_id, stages[1]) is False
+    assert is_stage_unlocked(db_session_factory, student_id, stages[1]) is True
+    assert is_stage_unlocked(db_session_factory, student_id, stages[2]) is False
 
 
 def test_second_stage_unlocks_after_submission(

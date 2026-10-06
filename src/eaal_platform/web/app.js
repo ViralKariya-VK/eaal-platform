@@ -127,6 +127,7 @@ let currentRefresh = null;
 let pendingScroll = null;
 
 function setScreen(html, activeNav, options) {
+  if (labMode && !(options && options.keepSidebar)) stopLabMode();
   currentRefresh = nextRefresh;
   nextRefresh = null;
   if (currentEditor) {
@@ -336,6 +337,7 @@ function showServerModal(settings) {
 }
 
 function showLogin() {
+  stopLabMode();
   stopLiveUpdates();
   document.getElementById("root").classList.add("auth-mode");
   document.getElementById("authScreen").innerHTML = `
@@ -401,6 +403,50 @@ function showLogin() {
   });
 }
 
+// -- Course / year / division / batch dropdowns (sign-up, new lab, class groups) ------------
+//
+// An administrator maintains the lists; a course sets how many years it has, and
+// the division and batch lists are the ones allowed for that course.
+
+function cohortSelectOptions(items, label) {
+  return `<option value="">${escapeHtml(label)}</option>` +
+    items.map((i) => `<option value="${escapeHtml(String(i.value))}">${escapeHtml(i.label)}</option>`).join("");
+}
+
+// Fills `<prefix>Year / Division / Batch` from the course chosen in `<prefix>Course`.
+function wireCohortSelects(prefix, courses, { current = {}, anyLabels = false, onChange = null } = {}) {
+  const el = (name) => document.getElementById(`${prefix}${name}`);
+  const sync = (keep) => {
+    const course = courses.find((c) => String(c.id) === el("Course").value);
+    const fill = (name, items, label, selected, hideWhenEmpty) => {
+      const select = el(name);
+      select.innerHTML = cohortSelectOptions(items, label);
+      select.disabled = !course;
+      const box = select.closest("label");
+      if (box && hideWhenEmpty) box.hidden = !!course && items.length === 0;
+      if (selected !== null && selected !== undefined && selected !== "") select.value = String(selected);
+    };
+    fill("Year", course ? course.year_options : [], anyLabels ? "Any year" : "Choose year", keep ? current.year : null, false);
+    fill("Division", course ? course.divisions.map((d) => ({ value: d.name, label: d.name })) : [], anyLabels ? "Any division" : "Choose division", keep ? current.division : null, true);
+    fill("Batch", course ? course.batches.map((b) => ({ value: b.name, label: b.name })) : [], anyLabels ? "Any batch" : "Choose batch", keep ? current.batch : null, true);
+    if (onChange) onChange();
+  };
+  el("Course").addEventListener("change", () => sync(false));
+  ["Year", "Division", "Batch"].forEach((name) => el(name).addEventListener("change", () => onChange && onChange()));
+  if (current.course_id) el("Course").value = String(current.course_id);
+  sync(true);
+}
+
+function readCohort(prefix) {
+  const value = (name) => document.getElementById(`${prefix}${name}`).value;
+  return {
+    course_id: value("Course") ? Number(value("Course")) : null,
+    year: value("Year") ? Number(value("Year")) : null,
+    division: value("Division") || null,
+    batch: value("Batch") || null,
+  };
+}
+
 function showCreateAccount() {
   document.getElementById("root").classList.add("auth-mode");
   document.getElementById("authScreen").innerHTML = `
@@ -429,7 +475,7 @@ function showCreateAccount() {
           <label>Password <input type="password" id="createPassword" placeholder="At least 8 characters" /></label>
           ${
             loginRole === "student"
-              ? `<label>Enrolment No. <span class="muted">(optional)</span> <input type="text" id="createEnrollment" placeholder="e.g. BSC2026007" /></label>`
+              ? `<div id="cohortFields"></div>`
               : ""
           }
           <p class="auth-error" id="createError"></p>
@@ -451,6 +497,35 @@ function showCreateAccount() {
 
   document.getElementById("goToLogin").addEventListener("click", showLogin);
 
+  // Students say where they study. The lists come from the administrator; with
+  // none set up the old optional enrolment number is shown instead.
+  let signupCourses = [];
+  if (loginRole === "student") {
+    api()
+      .get_academic_options()
+      .then((courses) => {
+        signupCourses = courses || [];
+        const host = document.getElementById("cohortFields");
+        if (!host) return;
+        host.innerHTML = signupCourses.length
+          ? `<label>Course <select id="signupCourse">${cohortSelectOptions(signupCourses.map((c) => ({ value: c.id, label: c.name })), "Choose your course")}</select></label>
+             <div class="field-pair">
+               <label>Year <select id="signupYear"></select></label>
+               <label>Roll Number <input type="text" id="signupRoll" placeholder="e.g. 27" /></label>
+             </div>
+             <div class="field-pair">
+               <label>Division <select id="signupDivision"></select></label>
+               <label>Batch <select id="signupBatch"></select></label>
+             </div>`
+          : `<label>Enrolment No. <span class="muted">(optional)</span> <input type="text" id="createEnrollment" placeholder="e.g. BSC2026007" /></label>`;
+        if (signupCourses.length) wireCohortSelects("signup", signupCourses);
+      })
+      .catch(() => {
+        const host = document.getElementById("cohortFields");
+        if (host) host.innerHTML = `<p class="muted">Couldn't load the course list. Check the server connection and try again.</p>`;
+      });
+  }
+
   document.getElementById("createAccountButton").addEventListener("click", () => {
     const name = document.getElementById("createName").value.trim();
     const email = document.getElementById("createEmail").value.trim();
@@ -466,8 +541,26 @@ function showCreateAccount() {
     }
     const enrollmentField = document.getElementById("createEnrollment");
     const enrollmentNo = enrollmentField ? enrollmentField.value.trim() || null : null;
+    let cohort = null;
+    if (loginRole === "student" && signupCourses.length) {
+      cohort = { ...readCohort("signup"), roll_number: document.getElementById("signupRoll").value.trim() || null };
+      const needsDivision = !document.getElementById("signupDivision").closest("label").hidden;
+      const needsBatch = !document.getElementById("signupBatch").closest("label").hidden;
+      const missing =
+        !cohort.course_id ? "Choose your course."
+        : !cohort.year ? "Choose your year."
+        : needsDivision && !cohort.division ? "Choose your division."
+        : needsBatch && !cohort.batch ? "Choose your batch."
+        : !cohort.roll_number ? "Enter your roll number."
+        : null;
+      if (missing) {
+        errorEl.textContent = missing;
+        return;
+      }
+    }
+    errorEl.textContent = "";
     api()
-      .create_account(loginRole, name, email, password, enrollmentNo)
+      .create_account(loginRole, name, email, password, enrollmentNo, cohort)
       .then((result) => {
         if (!result.ok) {
           errorEl.textContent = result.error || "Could not create account.";
@@ -545,8 +638,8 @@ function setActiveNav(key) {
 
 // -- Sidebar: workspace context -------------------------------------------
 
-function renderWorkspaceSidebar(info, stages) {
-  const backAction = info.is_stage ? () => showStages(info.task_id) : showLabs;
+function renderWorkspaceSidebar(info, stages, navigate, leave) {
+  const backAction = leave || (info.is_stage ? () => showStages(info.task_id) : showLabs);
   const backLabel = info.is_stage ? "Back to Lab" : "Back to Home";
 
   const taskNav = stages
@@ -581,10 +674,7 @@ function renderWorkspaceSidebar(info, stages) {
       </div>
       ${taskNav}
       <div class="sidebar-section-label">Resources</div>
-      <ul class="resource-list">
-        <li>${icon("file")}Task Description</li>
-        <li>${icon("file")}Reference Notes</li>
-      </ul>
+      <div id="sessionResources" class="session-resources"><p class="muted">Loading…</p></div>
     </div>
     <div class="sidebar-footer">Learn. Think.<br />Collaborate. Grow.</div>
   `;
@@ -594,9 +684,46 @@ function renderWorkspaceSidebar(info, stages) {
     document
       .querySelectorAll(".task-nav-item[data-unlocked='true']:not([disabled])")
       .forEach((btn) => {
-        btn.addEventListener("click", () => startStage(Number(btn.dataset.stageId)));
+        btn.addEventListener("click", () => navigate(Number(btn.dataset.stageId)));
       });
   }
+  loadSessionResources(info);
+}
+
+// What the student's professor shared, inside the coding screen: first what is
+// attached to this lab, then everything else shared with them.
+function loadSessionResources(info) {
+  const box = document.getElementById("sessionResources");
+  if (!box) return;
+  Promise.all([api().get_lab_resources(info.task_id), api().get_student_resources()])
+    .then(([forLab, everything]) => {
+      const target = document.getElementById("sessionResources");
+      if (!target) return;
+      const labIds = new Set(forLab.map((r) => r.id));
+      const others = everything.filter((r) => !labIds.has(r.id));
+      const byId = Object.fromEntries([...forLab, ...others].map((r) => [r.id, r]));
+      const item = (r) => `
+        <li><button class="resource-item" data-resource-id="${r.id}" title="${escapeHtml(r.title)}">
+          <span class="kind-badge kind-${r.kind.toLowerCase()}">${RESOURCE_KIND_LABEL[r.kind] || r.kind}</span>
+          <span class="resource-item-title">${escapeHtml(r.title)}</span>
+        </button></li>`;
+      const group = (heading, list) =>
+        list.length ? `<div class="resource-group">${heading}</div><ul class="resource-list">${list.map(item).join("")}</ul>` : "";
+      target.innerHTML =
+        forLab.length || others.length
+          ? group("For this lab", forLab) + group("From your professor", others)
+          : `<p class="muted">Nothing has been shared with you yet.</p>`;
+      target.querySelectorAll(".resource-item").forEach((button) => {
+        button.addEventListener("click", () => {
+          const resource = byId[Number(button.dataset.resourceId)];
+          if (resource) runResourceAction(resource, DEFAULT_RESOURCE_ACTION[resource.kind] || "open");
+        });
+      });
+    })
+    .catch(() => {
+      const target = document.getElementById("sessionResources");
+      if (target) target.innerHTML = `<p class="muted">Resources can't be loaded right now.</p>`;
+    });
 }
 
 // -- Header: session timer / end session -----------------------------------
@@ -608,7 +735,7 @@ function formatClock(totalSeconds) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function renderWorkspaceHeaderExtra(durationMinutes, onEndSession) {
+function renderWorkspaceHeaderExtra(durationMinutes, onEndSession, elapsedSeconds = 0) {
   const headerExtra = document.getElementById("headerExtra");
   if (!durationMinutes) {
     headerExtra.innerHTML = `<button class="danger" id="endSessionButton">End Session</button>`;
@@ -616,7 +743,7 @@ function renderWorkspaceHeaderExtra(durationMinutes, onEndSession) {
     return;
   }
 
-  let remaining = durationMinutes * 60;
+  let remaining = Math.max(0, durationMinutes * 60 - elapsedSeconds);
   headerExtra.innerHTML = `
     <div class="timer" id="sessionTimer">
       <span class="timer-label">Time Remaining</span>
@@ -697,6 +824,26 @@ function resourceCard(r, manage) {
     </div>`;
 }
 
+const DEFAULT_RESOURCE_ACTION = { FILE: "open", LINK: "link", NOTE: "read" };
+
+// Open / save / follow / read one resource (shared by the Resources screens and the coding screen).
+function runResourceAction(resource, act) {
+  const run = (promise) =>
+    promise.then((result) => {
+      if (result && result.ok === false && !result.cancelled) {
+        showToast(result.error || "That didn't work.");
+      }
+    });
+  if (labMode && ["open", "save", "link"].includes(act)) {
+    pauseLabFocusCheck();
+    showToast("Opening it outside CAVY. Close it and come back to the lab; the clock is not counting this.");
+  }
+  if (act === "open") run(api().open_resource(resource.id));
+  else if (act === "save") run(api().save_resource(resource.id));
+  else if (act === "link") run(api().open_link(resource.url));
+  else if (act === "read") showNoteModal(resource);
+}
+
 function bindResourceCards(container, resources, handlers = {}) {
   const byId = Object.fromEntries(resources.map((r) => [r.id, r]));
   container.querySelectorAll(".resource-card").forEach((card) => {
@@ -705,18 +852,9 @@ function bindResourceCards(container, resources, handlers = {}) {
     card.querySelectorAll("[data-act]").forEach((button) => {
       button.addEventListener("click", () => {
         const act = button.dataset.act;
-        const run = (promise) =>
-          promise.then((result) => {
-            if (result && result.ok === false && !result.cancelled) {
-              showToast(result.error || "That didn't work.");
-            }
-          });
-        if (act === "open") run(api().open_resource(resource.id));
-        else if (act === "save") run(api().save_resource(resource.id));
-        else if (act === "link") run(api().open_link(resource.url));
-        else if (act === "read") showNoteModal(resource);
-        else if (act === "edit" && handlers.onEdit) handlers.onEdit(resource);
+        if (act === "edit" && handlers.onEdit) handlers.onEdit(resource);
         else if (act === "delete" && handlers.onDelete) handlers.onDelete(resource);
+        else runResourceAction(resource, act);
       });
     });
   });
@@ -991,7 +1129,12 @@ function showProfile() {
     <div class="card" style="max-width:420px;">
       <p><b>${escapeHtml(profile.name)}</b> <span class="pill pill-neutral">${roleLabel}</span></p>
       <p class="muted" style="margin-top:6px;">${escapeHtml(profile.email || "")}</p>
-      ${profile.enrollment_no ? `<p class="muted">Enrolment No. ${escapeHtml(profile.enrollment_no)}</p>` : ""}
+      ${
+        profile.course
+          ? `<p class="muted">${escapeHtml([profile.course, profile.year_label, profile.division && "Div " + profile.division, profile.batch && "Batch " + profile.batch].filter(Boolean).join(" · "))}</p>`
+          : ""
+      }
+      ${profile.roll_number ? `<p class="muted">Roll No. ${escapeHtml(profile.roll_number)}</p>` : profile.enrollment_no ? `<p class="muted">Enrolment No. ${escapeHtml(profile.enrollment_no)}</p>` : ""}
       <p class="muted" id="teacherLine" style="margin-top:6px;"></p>
       <button class="danger" id="logoutButton" style="margin-top:16px;">Log Out</button>
     </div>
@@ -1494,39 +1637,122 @@ function showReportsList() {
   renderLabsScreen("reports", "Reports", "Select a lab to view its report.", "Reports", false);
 }
 
+// The class as a tree: course > year > division and batch, each with its students.
+function classTreeHtml(students, studentRow) {
+  const byKey = (list, key) => {
+    const groups = new Map();
+    list.forEach((item) => {
+      const k = key(item);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(item);
+    });
+    return [...groups.entries()];
+  };
+  const noCourse = "No course set";
+  const courses = byKey(students, (s) => s.course || noCourse).sort(([a], [b]) =>
+    a === noCourse ? 1 : b === noCourse ? -1 : a.localeCompare(b)
+  );
+  const average = (list) => {
+    const scores = list.map((s) => s.overall_ciq).filter((v) => v !== null);
+    return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  };
+  const summary = (label, list, level) =>
+    `<summary class="tree-${level}"><span>${escapeHtml(label)}</span><span class="muted">${list.length} student${list.length === 1 ? "" : "s"}${average(list) === null ? "" : ` &middot; average CIQ ${average(list)}`}</span></summary>`;
+  const table = (list) => `
+    <div class="card tree-table"><table class="data-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Roll No.</th><th>Submitted</th><th>CIQ</th><th>Action</th></tr></thead>
+      <tbody>${list.sort((a, b) => a.name.localeCompare(b.name)).map(studentRow).join("")}</tbody>
+    </table></div>`;
+  return courses
+    .map(([course, inCourse]) => {
+      const years = byKey(inCourse, (s) => s.year || 0).sort(([a], [b]) => a - b);
+      return `<details class="tree-node" open>${summary(course, inCourse, "course")}
+        ${years
+          .map(([year, inYear]) => {
+            const groups = byKey(inYear, (s) => `${s.division ? "Division " + s.division : "No division"} · ${s.batch ? "Batch " + s.batch : "No batch"}`).sort(([a], [b]) => a.localeCompare(b));
+            return `<details class="tree-node tree-child" open>${summary(year ? inYear[0].year_label : "Year not set", inYear, "year")}
+              ${groups.map(([label, list]) => `<div class="tree-group"><div class="tree-group-label">${escapeHtml(label)} <span class="muted">· ${list.length}</span></div>${table(list)}</div>`).join("")}
+            </details>`;
+          })
+          .join("")}
+      </details>`;
+    })
+    .join("");
+}
+
+function placeLine(item) {
+  if (!item.course) return "—";
+  return [item.course, item.year_label, item.division && `Div ${item.division}`, item.batch && `Batch ${item.batch}`]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function showStudents() {
-  Promise.all([api().get_students(), api().get_unassigned_students()]).then(([students, unassigned]) => {
-    const rows = students
-      .map(
-        (student) => `
+  Promise.all([
+    api().get_class_overview(),
+    api().get_unassigned_students(),
+    api().get_my_courses(),
+    api().get_class_groups(),
+  ]).then(([students, unassigned, myCourses, groups]) => {
+    nextRefresh = null;
+    const studentRow = (student) => `
       <tr>
-        <td>${escapeHtml(student.name)}${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
+        <td><button class="link-button view-progress" data-student-id="${student.id}" title="See ${escapeHtml(student.name)}'s progress">${escapeHtml(student.name)}</button>${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
         <td>${escapeHtml(student.email || "—")}</td>
-        <td>${escapeHtml(student.enrollment_no || "—")}</td>
+        <td>${escapeHtml(student.roll_number || student.enrollment_no || "—")}</td>
+        <td>${student.sessions_submitted}</td>
+        <td>${
+          student.overall_ciq === null
+            ? `<span class="muted">—</span>`
+            : `<button class="ciq-pill view-progress" data-student-id="${student.id}" title="See the CIQ graph">${Math.round(student.overall_ciq)}</button>`
+        }</td>
         <td class="row-actions-cell"><div class="row-actions">
           <button class="ghost reset-password-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Reset password</button>
           <button class="ghost remove-student-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Remove</button>
         </div></td>
-      </tr>`
-      )
-      .join("");
+      </tr>`;
+    const rows = classTreeHtml(students, studentRow);
     const addable = unassigned
       .map(
-        (s) => `<label class="inline-check"><input type="checkbox" data-add="${s.id}" /> ${escapeHtml(s.name)} <span class="muted">${escapeHtml(s.email || "")}${s.enrollment_no ? " · " + escapeHtml(s.enrollment_no) : ""}</span></label>`
+        (s) => `<label class="inline-check"><input type="checkbox" data-add="${s.id}" /> ${escapeHtml(s.name)} <span class="muted">${escapeHtml(placeLine(s))}${s.roll_number ? " · Roll " + escapeHtml(s.roll_number) : ""}</span></label>`
       )
       .join("");
-    nextRefresh = { topics: ["accounts", "presence"], run: () => showStudents() };
+    nextRefresh = { topics: ["accounts", "submissions"], run: () => showStudents() };
     setScreen(
       `
     <div class="page-heading"><div><h1>My class</h1><p class="subtitle">The students in your class. Only you (and an administrator) can manage them or share resources with them.</p></div></div>
-    <div class="card" style="padding:0; overflow:hidden;">
-      <table class="data-table">
-        <thead><tr><th>Name</th><th>Email</th><th>Enrolment No.</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="muted" style="padding:16px;">Nobody in your class yet. Add students below.</td></tr>`}</tbody>
-      </table>
+    ${rows || `<div class="card"><p class="muted">Nobody in your class yet. Add a group or students below.</p></div>`}
+    <div class="page-heading" style="margin-top:28px;"><div><h2>Add a whole group</h2>
+      <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it who isn't in another class joins yours. Students of that group who sign up later join automatically.</p></div></div>
+    <div class="card" id="groupCard">
+      ${
+        myCourses.length
+          ? `<div class="group-form">
+               <label>Course <select id="groupCourse">${cohortSelectOptions(myCourses.map((c) => ({ value: c.id, label: c.name })), "Choose a course")}</select></label>
+               <label>Year <select id="groupYear"></select></label>
+               <label>Division <select id="groupDivision"></select></label>
+               <label>Batch <select id="groupBatch"></select></label>
+             </div>
+             <p class="muted" id="groupPreview" style="margin:10px 0 0;">Choose a course to see who would be added.</p>
+             <button class="primary" id="addGroup" style="margin-top:12px;" disabled>Add this group to my class</button>`
+          : `<p class="muted">No course has been assigned to you yet. Ask your administrator to assign you the courses you teach; then you can add their students here.</p>`
+      }
+      ${
+        groups.length
+          ? `<h3 style="margin:18px 0 6px;">Groups in your class</h3>
+             <ul class="group-list">${groups
+               .map(
+                 (g) => `<li><span>${escapeHtml(g.label)} <span class="muted">· ${g.students} student${g.students === 1 ? "" : "s"} now</span></span>
+                   <button class="ghost remove-group-button" data-group-id="${g.id}" title="Stop adding new students from this group (the ones already in your class stay)">Stop adding</button></li>`
+               )
+               .join("")}</ul>`
+          : ""
+      }
     </div>
-    <div class="page-heading" style="margin-top:28px;"><div><h2>Add students</h2>
-      <p class="subtitle">Students who have an account but aren't in anyone's class yet. A student can be in one class at a time.</p></div></div>
+    <div class="page-heading" style="margin-top:28px;"><div><h2>Add individual students</h2>
+      <p class="subtitle">Students who have an account but aren't in anyone's class yet${
+        myCourses.length ? ", in the courses you teach" : ""
+      }. A student can be in one class at a time.</p></div></div>
     <div class="card">
       ${
         unassigned.length
@@ -1536,6 +1762,55 @@ function showStudents() {
     </div>`,
       "students"
     );
+    if (myCourses.length) {
+      const addGroupButton = document.getElementById("addGroup");
+      const preview = document.getElementById("groupPreview");
+      const showPreview = () => {
+        const group = readCohort("group");
+        addGroupButton.disabled = true;
+        if (!group.course_id) {
+          preview.textContent = "Choose a course to see who would be added.";
+          return;
+        }
+        api()
+          .preview_class_group(group)
+          .then((result) => {
+            if (!result.ok) {
+              preview.textContent = result.error;
+              return;
+            }
+            preview.textContent =
+              `${result.matching} student${result.matching === 1 ? "" : "s"} in this group: ` +
+              `${result.to_add} would be added, ${result.already_yours} already in your class, ` +
+              `${result.in_other_class} in another professor's class.`;
+            addGroupButton.disabled = false;
+          });
+      };
+      wireCohortSelects("group", myCourses, { anyLabels: true, onChange: showPreview });
+      addGroupButton.addEventListener("click", () => {
+        api()
+          .add_class_group(readCohort("group"))
+          .then((result) => {
+            if (!result.ok) showToast(result.error || "Couldn't add the group.");
+            else
+              showToast(
+                `${result.added} student${result.added === 1 ? "" : "s"} added` +
+                  (result.in_other_class ? `; ${result.in_other_class} already belong to another class.` : ".")
+              );
+            showStudents();
+          });
+      });
+    }
+    document.querySelectorAll(".remove-group-button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        api()
+          .remove_class_group(Number(btn.dataset.groupId))
+          .then((result) => {
+            if (!result.ok) showToast(result.error || "Couldn't remove the group.");
+            showStudents();
+          });
+      });
+    });
     const addButton = document.getElementById("addToClass");
     if (addButton) {
       addButton.addEventListener("click", () => {
@@ -1553,6 +1828,9 @@ function showStudents() {
           });
       });
     }
+    document.querySelectorAll(".view-progress").forEach((btn) => {
+      btn.addEventListener("click", () => showStudentProgress(Number(btn.dataset.studentId)));
+    });
     document.querySelectorAll(".remove-student-button").forEach((btn) => {
       btn.addEventListener("click", () => {
         confirmModal({
@@ -1643,6 +1921,13 @@ function showEditSession(taskId) {
 }
 
 function showCreateSession(existing = null) {
+  api()
+    .get_my_courses()
+    .then((courses) => renderCreateSession(existing, courses || []))
+    .catch(() => renderCreateSession(existing, []));
+}
+
+function renderCreateSession(existing, courses) {
   const editing = existing !== null;
   const savedStage = (type) => (existing ? existing.stages.find((s) => s.stage_type === type) : null);
   const stageCards = STAGE_CONFIG.map((stage) => {
@@ -1684,18 +1969,36 @@ function showCreateSession(existing = null) {
         <label class="span-2">Session Title <span class="required">*</span>
           <input type="text" id="sessionTitle" placeholder="Enter session title" />
         </label>
-        <label>Course
-          <input type="text" id="sessionCourse" placeholder="e.g. B.Sc. Data Science" />
-        </label>
-        <label>Topic
-          <input type="text" id="sessionTopic" placeholder="Enter topic" />
-        </label>
-        <label>Division
-          <input type="text" id="sessionDivision" placeholder="e.g. A" />
-        </label>
-        <label>Batch
-          <input type="text" id="sessionBatch" placeholder="e.g. 2026" />
-        </label>
+        ${
+          courses.length
+            ? `<label>Course <span class="required">*</span>
+                <select id="sessionCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.name })), "Choose a course")}</select>
+              </label>
+              <label>Topic
+                <input type="text" id="sessionTopic" placeholder="Enter topic" />
+              </label>
+              <label>Year <select id="sessionYear"></select></label>
+              <label>Division <select id="sessionDivision"></select></label>
+              <label>Batch <select id="sessionBatch"></select></label>
+              <p class="muted span-2" style="margin:0;">Only students in this course (and the year, division and batch you pick) will get this lab.</p>`
+            : serverMode
+              ? `<label>Topic
+                  <input type="text" id="sessionTopic" placeholder="Enter topic" />
+                </label>
+                <p class="muted span-2" style="margin:0;">No course has been assigned to you yet, so this lab goes to your own class. Ask your administrator to assign you a course to aim labs at a year, division or batch.</p>`
+              : `<label>Course
+                  <input type="text" id="sessionCourse" placeholder="e.g. B.Sc. Data Science" />
+                </label>
+                <label>Topic
+                  <input type="text" id="sessionTopic" placeholder="Enter topic" />
+                </label>
+                <label>Division
+                  <input type="text" id="sessionDivision" placeholder="e.g. A" />
+                </label>
+                <label>Batch
+                  <input type="text" id="sessionBatch" placeholder="e.g. 2026" />
+                </label>`
+        }
         <label>Difficulty
           <select id="sessionDifficulty">
             <option value="Easy">Easy</option>
@@ -1704,8 +2007,9 @@ function showCreateSession(existing = null) {
           </select>
         </label>
         <label class="span-2">Description
-          <textarea id="sessionDescription" rows="3" placeholder="Enter a brief description about this session..."></textarea>
+          <textarea id="sessionDescription" rows="4" placeholder="Describe the problem students will solve..."></textarea>
         </label>
+        <div class="span-2 ai-draft-row"><button class="ghost" id="draftDescription" type="button">${icon("sparkle")}Draft with AI</button><span class="muted" id="draftStatus">Write a few words about the problem first, or leave it empty to use just the title and topic.</span></div>
       </div>
     </div>
     <div class="card" style="margin-top:16px;">
@@ -1722,6 +2026,16 @@ function showCreateSession(existing = null) {
   );
 
   document.getElementById("backButton").addEventListener("click", showMyLabs);
+  wireAiDraft(
+    document.getElementById("draftDescription"),
+    document.getElementById("draftStatus"),
+    document.getElementById("sessionDescription"),
+    () => ({
+      title: document.getElementById("sessionTitle").value.trim(),
+      topic: document.getElementById("sessionTopic").value.trim(),
+      difficulty: document.getElementById("sessionDifficulty").value,
+    })
+  );
   document.getElementById("createLabButton").addEventListener("click", () => {
     const title = document.getElementById("sessionTitle").value.trim();
     const errorEl = document.getElementById("createLabError");
@@ -1738,11 +2052,23 @@ function showCreateSession(existing = null) {
       ai_assistance_mode: document.querySelector(`.stage-mode[data-stage="${stage.type}"]`).value,
     }));
 
+    const text = (id) => {
+      const field = document.getElementById(id);
+      return field ? field.value.trim() || null : null;
+    };
+    let target;
+    if (courses.length) {
+      target = readCohort("session");
+      if (!target.course_id) {
+        errorEl.textContent = "Choose which course this lab is for.";
+        return;
+      }
+    } else {
+      target = { course: text("sessionCourse"), division: text("sessionDivision"), batch: text("sessionBatch") };
+    }
     const payload = {
       title,
-      course: document.getElementById("sessionCourse").value.trim() || null,
-      division: document.getElementById("sessionDivision").value.trim() || null,
-      batch: document.getElementById("sessionBatch").value.trim() || null,
+      ...target,
       topic: document.getElementById("sessionTopic").value.trim() || null,
       description: document.getElementById("sessionDescription").value.trim() || null,
       difficulty: document.getElementById("sessionDifficulty").value,
@@ -1752,7 +2078,10 @@ function showCreateSession(existing = null) {
     if (!editing) {
       api()
         .create_lab(payload)
-        .then(() => showMyLabs());
+        .then((result) => {
+          if (result && result.ok === false) errorEl.textContent = result.error || "Couldn't create the lab.";
+          else showMyLabs();
+        });
       return;
     }
     // A locked stage's <select> is disabled, so send back the mode it already has.
@@ -1769,13 +2098,20 @@ function showCreateSession(existing = null) {
       });
   });
 
+  if (courses.length) wireCohortSelects("session", courses, { current: editing ? existing : {}, anyLabels: true });
+
   if (editing) {
-    const set = (id, value) => (document.getElementById(id).value = value || "");
+    const set = (id, value) => {
+      const field = document.getElementById(id);
+      if (field) field.value = value || "";
+    };
     set("sessionTitle", existing.title);
-    set("sessionCourse", existing.course);
+    if (!courses.length) {
+      set("sessionCourse", existing.course);
+      set("sessionDivision", existing.division);
+      set("sessionBatch", existing.batch);
+    }
     set("sessionTopic", existing.topic);
-    set("sessionDivision", existing.division);
-    set("sessionBatch", existing.batch);
     set("sessionDescription", existing.description);
     if (existing.difficulty) document.getElementById("sessionDifficulty").value = existing.difficulty;
   }
@@ -1829,59 +2165,120 @@ function confirmModal({ title, message, confirmLabel, danger, onConfirm }) {
   });
 }
 
-function showAddFollowupModal(sourceTaskId, onDone) {
+// Wires a "Draft with AI" button: sends the title/topic/difficulty and whatever is already
+// in the description box (a rough idea, or a draft to improve) and puts the result in the box.
+function wireAiDraft(button, status, textarea, getSpec) {
+  button.addEventListener("click", () => {
+    const spec = { ...getSpec(), notes: textarea.value.trim() };
+    if (!spec.title && !spec.notes) {
+      status.textContent = "Enter a title (or a few notes) first.";
+      return;
+    }
+    button.disabled = true;
+    status.textContent = "Writing\u2026";
+    api()
+      .draft_problem_description(spec)
+      .then((result) => {
+        if (result.ok) {
+          textarea.value = result.text;
+          status.textContent = "Drafted. Read it through and edit it before saving.";
+        } else {
+          status.textContent = result.error || "The AI couldn't draft that.";
+        }
+      })
+      .catch((err) => {
+        status.textContent = errorText(err);
+      })
+      .finally(() => {
+        button.disabled = false;
+      });
+  });
+}
+
+// Create a follow-up (pass ``sourceTaskId``) or edit one (pass ``followup``).
+function showFollowupModal({ sourceTaskId = null, followup = null, onDone }) {
+  const editing = followup !== null;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `
     <div class="modal-card">
-      <h2>Add Follow-Up Assessment</h2>
-      <p class="muted">Spin off a Transfer Task or Retention Check linked to this Lab.</p>
-      <label>Kind
+      <h2>${editing ? "Edit Follow-Up Assessment" : "Add Follow-Up Assessment"}</h2>
+      <p class="muted">${editing ? "Change the title, the problem, the AI mode or the time." : "Spin off a Transfer Task or Retention Check linked to this Lab."}</p>
+      ${
+        editing
+          ? ""
+          : `<label>Kind
         <select id="followupKind">
           <option value="TRANSFER">Transfer Task (a different problem, same concept)</option>
           <option value="RETENTION">Retention Check (same concept, attempted later)</option>
         </select>
-      </label>
+      </label>`
+      }
       <label>Title
         <input type="text" id="followupTitle" placeholder="e.g. Recursion Basics — Transfer Task" />
       </label>
       <label>Problem Description
-        <textarea id="followupDescription" rows="3" placeholder="Describe the task the student will attempt..."></textarea>
+        <textarea id="followupDescription" rows="5" placeholder="Describe the task the student will attempt..."></textarea>
       </label>
+      <div class="ai-draft-row"><button class="ghost" id="followupDraft">${icon("sparkle")}Draft with AI</button><span class="muted" id="followupDraftStatus"></span></div>
       <label>AI Assistance
-        <select id="followupAiMode">
+        <select id="followupAiMode" ${editing && followup.mode_locked ? "disabled" : ""}>
           <option value="RESTRICTED">Restricted</option>
           <option value="NONE">None</option>
           <option value="FULL">Full</option>
         </select>
+        ${editing && followup.mode_locked ? `<span class="muted">Locked — students have already started it.</span>` : ""}
       </label>
       <label>Duration (minutes)
         <input type="number" id="followupDuration" value="20" min="1" />
       </label>
+      <p class="muted" id="followupError" style="color:var(--danger-text, #b3261e);"></p>
       <div class="modal-actions">
         <button class="ghost" id="followupCancel">Cancel</button>
-        <button class="primary" id="followupCreate">Create</button>
+        <button class="primary" id="followupCreate">${editing ? "Save" : "Create"}</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
 
+  const value = (id) => document.getElementById(id).value;
+  if (editing) {
+    document.getElementById("followupTitle").value = followup.title || "";
+    document.getElementById("followupDescription").value = followup.description || "";
+    document.getElementById("followupAiMode").value = followup.ai_assistance_mode || "RESTRICTED";
+    document.getElementById("followupDuration").value = followup.duration_minutes || "";
+  }
+  wireAiDraft(
+    document.getElementById("followupDraft"),
+    document.getElementById("followupDraftStatus"),
+    document.getElementById("followupDescription"),
+    () => ({ title: value("followupTitle").trim() })
+  );
+
   document.getElementById("followupCancel").addEventListener("click", () => overlay.remove());
   document.getElementById("followupCreate").addEventListener("click", () => {
-    const title = document.getElementById("followupTitle").value.trim();
-    if (!title) return;
-    api()
-      .create_followup_assessment({
-        source_task_id: sourceTaskId,
-        kind: document.getElementById("followupKind").value,
-        title,
-        description: document.getElementById("followupDescription").value.trim(),
-        ai_assistance_mode: document.getElementById("followupAiMode").value,
-        duration_minutes: Number(document.getElementById("followupDuration").value) || null,
-      })
-      .then(() => {
-        overlay.remove();
-        onDone();
-      });
+    const title = value("followupTitle").trim();
+    const errorEl = document.getElementById("followupError");
+    if (!title) {
+      errorEl.textContent = "A title is required.";
+      return;
+    }
+    const fields = {
+      title,
+      description: value("followupDescription").trim(),
+      ai_assistance_mode: value("followupAiMode"),
+      duration_minutes: Number(value("followupDuration")) || null,
+    };
+    const request = editing
+      ? api().update_followup_assessment(followup.id, fields)
+      : api().create_followup_assessment({ ...fields, source_task_id: sourceTaskId, kind: value("followupKind") });
+    request.then((result) => {
+      if (result && result.ok === false) {
+        errorEl.textContent = result.error || "That didn't work.";
+        return;
+      }
+      overlay.remove();
+      onDone();
+    });
   });
 }
 
@@ -1893,6 +2290,10 @@ function followupAssessmentSummary(followups) {
     <div class="card followup-summary-card">
       <span class="pill pill-amber">${kindLabel[f.assessment_kind] || f.assessment_kind}</span>
       <b>${escapeHtml(f.title)}</b>
+      <span class="muted">${f.submitted_count} submitted</span>
+      <span class="spacer"></span>
+      <button class="ghost followup-view" data-task-id="${f.id}">View submissions</button>
+      <button class="ghost followup-edit" data-task-id="${f.id}">Edit</button>
     </div>`
     )
     .join("");
@@ -1904,7 +2305,7 @@ function followupAssessmentSummary(followups) {
     ${rows || `<p class="muted">None yet — add a Transfer Task or Retention Check to collect S3.3/S3.4 evidence.</p>`}`;
 }
 
-function showLabReport(taskId) {
+function showLabReport(taskId, parentTaskId = null) {
   Promise.all([
     api().get_lab_report(taskId),
     api().get_professor_labs(),
@@ -1914,11 +2315,11 @@ function showLabReport(taskId) {
       .map(
         (row) => `
         <tr>
-          <td>${escapeHtml(row.student_name)}</td>
+          <td><button class="link-button view-work" data-student-id="${row.student_id}" title="See their submitted code and output">${escapeHtml(row.student_name)}</button></td>
           <td>${escapeHtml(row.enrollment_no || "—")}</td>
           <td>${row.score === null ? "—" : row.score}</td>
           <td>${row.submitted_at ? escapeHtml(new Date(row.submitted_at).toLocaleString()) : "—"}</td>
-          <td><span class="pill ${row.status === "Submitted" ? "pill-ready" : "pill-danger"}">${row.status}</span></td>
+          <td><span class="pill ${row.status === "Submitted" ? "pill-ready" : "pill-danger"}">${row.status}</span>${row.note ? `<div class="muted report-note">${escapeHtml(row.note)}</div>` : ""}</td>
         </tr>`
       )
       .join("");
@@ -1930,9 +2331,9 @@ function showLabReport(taskId) {
     nextRefresh = { topics: ["submissions", "activity"], run: () => showLabReport(taskId) };
     setScreen(
       `
-        <button class="back-link" id="backButton">${icon("back")}Back to Dashboard</button>
+        <button class="back-link" id="backButton">${icon("back")}${parentTaskId ? "Back to the lab report" : "Back to Dashboard"}</button>
         <div class="page-heading">
-          <div><h1>${escapeHtml(report.task_title)}</h1><p class="subtitle">${escapeHtml(meta)}</p></div>
+          <div><h1>${escapeHtml(report.task_title)}</h1><p class="subtitle">${escapeHtml(meta)}${parentTaskId ? " &middot; follow-up assessment" : ""}</p></div>
           <button id="exportReportButton">${icon("download")}Export Report</button>
         </div>
         <div class="card report-summary">
@@ -1964,21 +2365,43 @@ function showLabReport(taskId) {
             </tbody>
           </table>
         </div>
-        ${followupAssessmentSummary(followups)}
+        ${parentTaskId ? "" : followupAssessmentSummary(followups)}
       `,
       "reports"
     );
 
-    document.getElementById("backButton").addEventListener("click", showMyLabs);
+    document.getElementById("backButton").addEventListener("click", () =>
+      parentTaskId ? showLabReport(parentTaskId) : showMyLabs()
+    );
+    document.querySelectorAll(".view-work").forEach((button) => {
+      button.addEventListener("click", () =>
+        api()
+          .get_student_submission(taskId, Number(button.dataset.studentId))
+          .then((work) => showStudentWork(work, () => showLabReport(taskId, parentTaskId), "Back to the report"))
+          .catch((err) => showToast(errorText(err)))
+      );
+    });
+    document.querySelectorAll(".followup-view").forEach((button) => {
+      button.addEventListener("click", () => showLabReport(Number(button.dataset.taskId), taskId));
+    });
+    document.querySelectorAll(".followup-edit").forEach((button) => {
+      button.addEventListener("click", () => {
+        const followup = followups.find((f) => f.id === Number(button.dataset.taskId));
+        showFollowupModal({ followup, onDone: () => showLabReport(taskId) });
+      });
+    });
     const exportButton = document.getElementById("exportReportButton");
     exportButton.addEventListener("click", () => exportReport(taskId, exportButton));
     wireFilterBar(allLabs, "report", (filters) => {
       const matches = filterLabs(allLabs, filters);
       if (matches.length > 0) showLabReport(matches[0].id);
     });
-    document.getElementById("addFollowupButton").addEventListener("click", () => {
-      showAddFollowupModal(taskId, () => showLabReport(taskId));
-    });
+    const addFollowup = document.getElementById("addFollowupButton");
+    if (addFollowup) {
+      addFollowup.addEventListener("click", () => {
+        showFollowupModal({ sourceTaskId: taskId, onDone: () => showLabReport(taskId) });
+      });
+    }
   });
 }
 
@@ -1997,8 +2420,8 @@ function showLabs() {
           ${lab.learning_objective ? `<p class="muted">${escapeHtml(lab.learning_objective)}</p>` : ""}
           <div class="meta-row">${icon("person")}${lab.professor_name ? escapeHtml(lab.professor_name) : "Self-paced"}</div>
           <div class="meta-row">${icon("clock")}${lab.stage_count} stage${lab.stage_count === 1 ? "" : "s"}</div>
-          <span class="pill pill-ready">Ready to start</span>
-          <button class="primary lab-start-button">Start ${icon("arrowRight")}</button>
+          <span class="pill ${lab.status === "not_started" ? "pill-ready" : lab.status === "submitted" ? "pill-ready" : "pill-neutral"}">${{ not_started: "Ready to start", in_progress: "In progress", submitted: "Submitted" }[lab.status] || "Ready to start"}</span>
+          <button class="primary lab-start-button">${{ in_progress: "Continue", submitted: "View" }[lab.status] || "Start"} ${icon("arrowRight")}</button>
         </div>`
         )
         .join("");
@@ -2069,6 +2492,33 @@ function followupAssessmentCards(followups) {
     <div class="stage-list">${cards}</div>`;
 }
 
+function confirmStartLab(onConfirm) {
+  confirmModal({
+    title: "Start the lab?",
+    message:
+      "The lab opens full screen and you must stay in this window while it is open. Switching to another app is blocked. If the window loses focus you get one warning; the second time your lab is submitted automatically. Pasting into the editor is recorded.",
+    confirmLabel: "Start",
+    onConfirm,
+  });
+}
+
+function stageStatusLabel(stage) {
+  if (stage.status === "submitted") return "Submitted";
+  if (stage.status === "in_progress") return "In progress";
+  return stage.unlocked ? "Ready to Start" : "Locked";
+}
+
+function formatSubmittedAt(iso) {
+  if (!iso) return "";
+  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(iso) ? iso : `${iso}Z`);
+  return isNaN(d) ? "" : `on ${d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+}
+
+function stageButtonLabel(stage) {
+  if (stage.status === "in_progress") return "Continue";
+  return "Start";
+}
+
 function showStages(taskId) {
   Promise.all([
     api().get_stages(taskId),
@@ -2097,12 +2547,16 @@ function showStages(taskId) {
             <h3>Stage ${index + 1}: ${STAGE_LABELS[stage.stage_type] || stage.stage_type}</h3>
             <div class="stage-meta">
               <span class="pill pill-neutral">AI Assistance: ${MODE_LABELS[stage.ai_assistance_mode] || stage.ai_assistance_mode}</span>
-              <span class="pill ${stage.unlocked ? "pill-ready" : "pill-locked"}">${stage.unlocked ? "Ready to Start" : "Locked"}</span>
+              <span class="pill ${stage.unlocked ? "pill-ready" : "pill-locked"}">${stageStatusLabel(stage)}</span>
             </div>
           </div>
-          <button class="primary stage-start-button" ${stage.unlocked ? "" : "disabled"}>
-            ${stage.unlocked ? "Start" : "Locked"} ${icon("arrowRight")}
-          </button>
+          ${
+            data.lab_submitted
+              ? `<span class="pill pill-ready">${icon("check")} Done</span>`
+              : `<button class="primary stage-start-button" ${stage.unlocked ? "" : "disabled"}>
+            ${stage.unlocked ? stageButtonLabel(stage) : "Locked"} ${icon("arrowRight")}
+          </button>`
+          }
         </div>`
         )
         .join("");
@@ -2119,6 +2573,16 @@ function showStages(taskId) {
           <div><h1>${escapeHtml(data.task_title)}</h1></div>
         </div>
         <div class="stepper">${steps}</div>
+        ${
+          data.lab_submitted
+            ? `<div class="card lab-submitted">
+                <div><strong>${icon("check")} This lab has been submitted</strong>
+                <div class="muted">Submitted ${escapeHtml(formatSubmittedAt(data.submitted_at))}. A lab can only be submitted once, so it can't be changed now.</div>
+                ${data.submit_note ? `<div class="muted" style="margin-top:6px;"><b>${escapeHtml(data.submit_note)}.</b></div>` : ""}</div>
+                <button class="primary" id="viewSubmission">View submission ${icon("arrowRight")}</button>
+              </div>`
+            : `<p class="muted stage-hint">Do the stages in order. You can go back and forth between them, and you submit the whole lab once, at the end of the last stage. You can save and leave at any time.</p>`
+        }
         <div class="stage-list">${cards}</div>
         ${followupAssessmentCards(followups)}
         ${resourceSection}
@@ -2128,15 +2592,21 @@ function showStages(taskId) {
       bindResourceCards(app, labResources);
 
       document.getElementById("backButton").addEventListener("click", showLabs);
+      const viewSubmission = document.getElementById("viewSubmission");
+      if (viewSubmission) {
+        viewSubmission.addEventListener("click", () => showSubmission(data.submitted_session_id));
+      }
       app.querySelectorAll(".stage-card").forEach((card) => {
-        if (card.dataset.unlocked !== "true") return;
-        card.querySelector(".stage-start-button").addEventListener("click", () => {
-          startStage(Number(card.dataset.stageId));
+        const start = card.querySelector(".stage-start-button");
+        if (card.dataset.unlocked !== "true" || !start) return;
+        start.addEventListener("click", () => {
+          const stageId = Number(card.dataset.stageId);
+          confirmStartLab(() => startStage(stageId));
         });
       });
       app.querySelectorAll(".followup-start-button").forEach((button) => {
         const card = button.closest(".stage-card");
-        button.addEventListener("click", () => startStage(Number(card.dataset.stageId)));
+        button.addEventListener("click", () => confirmStartLab(() => startStage(Number(card.dataset.stageId))));
       });
     }
   );
@@ -2154,6 +2624,125 @@ function startStage(stageId) {
   api()
     .start_stage(stageId)
     .then((info) => showWorkspace(info));
+}
+
+// -- Lab mode ------------------------------------------------------------------
+//
+// While a lab is being taken the window is full screen and the system's ways of
+// switching away are blocked (see client/lockdown.py). Because no operating system
+// lets an app block everything, losing focus is also counted on the server: the first
+// time is a warning, the second submits the lab for the student.
+
+let labMode = null;
+const LAB_REFOCUS_GRACE_MS = 600;
+
+function startLabMode(info, getFiles) {
+  if (!info.is_stage) {
+    stopLabMode();
+    return;
+  }
+  api().enter_lab_mode().catch(() => {});
+  if (labMode) {
+    labMode.info = info;
+    labMode.getFiles = getFiles;
+    return;
+  }
+  const state = { info, getFiles, lost: false, pendingWarning: false, timer: null, graceUntil: Date.now() + 3000 };
+  const reportLoss = () => {
+    state.lost = true;
+    api()
+      .record_focus_lost(state.info.session_id)
+      .then((result) => {
+        if (!labMode || result.action === "none") return;
+        if (result.action === "submit") submitBecauseTheyLeft();
+        else {
+          state.pendingWarning = true;
+          showFocusWarning();
+        }
+      })
+      .catch(() => {});
+  };
+  state.onBlur = () => {
+    if (state.lost || Date.now() < state.graceUntil) return;
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+      // Full-screen changes and dialogs blink focus; only a real departure counts.
+      if (!labMode || state.lost || Date.now() < state.graceUntil) return;
+      if (document.hasFocus() && document.visibilityState === "visible") return;
+      reportLoss();
+    }, LAB_REFOCUS_GRACE_MS);
+  };
+  state.onFocus = () => {
+    clearTimeout(state.timer);
+    setTimeout(() => {
+      if (labMode === state && document.hasFocus()) state.lost = false;
+    }, 300);
+    showFocusWarning();
+  };
+  state.onVisibility = () => (document.visibilityState === "hidden" ? state.onBlur() : state.onFocus());
+  window.addEventListener("blur", state.onBlur);
+  window.addEventListener("focus", state.onFocus);
+  document.addEventListener("visibilitychange", state.onVisibility);
+  labMode = state;
+}
+
+function stopLabMode() {
+  if (!labMode) return;
+  clearTimeout(labMode.timer);
+  window.removeEventListener("blur", labMode.onBlur);
+  window.removeEventListener("focus", labMode.onFocus);
+  document.removeEventListener("visibilitychange", labMode.onVisibility);
+  labMode = null;
+  api().leave_lab_mode().catch(() => {});
+}
+
+// Something that leaves CAVY on purpose (opening a resource in another app): don't count it.
+function pauseLabFocusCheck(ms = 60000) {
+  if (labMode) labMode.graceUntil = Date.now() + ms;
+}
+
+function showFocusWarning() {
+  if (!labMode || !labMode.pendingWarning || !document.hasFocus()) return;
+  labMode.pendingWarning = false;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay lab-alert";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>Warning: you left the lab window</h2>
+      <p class="muted">You have to stay in this window while the lab is open. This is your one warning:
+      if it happens again, your lab is submitted automatically as it is.</p>
+      <div class="modal-actions"><button class="primary" id="focusWarningOk">I understand</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("focusWarningOk").addEventListener("click", () => overlay.remove());
+}
+
+function submitBecauseTheyLeft() {
+  const state = labMode;
+  if (!state) return;
+  const { info, getFiles } = state;
+  api()
+    .submit_session(info.session_id, getFiles(), "focus")
+    .then(() => {
+      stopLabMode();
+      const finish = () => showSubmission(info.session_id);
+      document.querySelectorAll(".modal-overlay").forEach((o) => o.remove());
+      const overlay = document.createElement("div");
+      overlay.className = "modal-overlay lab-alert";
+      overlay.innerHTML = `
+        <div class="modal-card">
+          <h2>Your lab was submitted</h2>
+          <p class="muted">You left the lab window a second time, so the lab was submitted automatically with the work you had.
+          Your teacher can see that it ended this way.</p>
+          <div class="modal-actions"><button class="primary" id="labEndedOk">View submission</button></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      document.getElementById("labEndedOk").addEventListener("click", () => {
+        overlay.remove();
+        finish();
+      });
+    })
+    .catch((err) => showToast(errorText(err)));
 }
 
 // -- Workspace -------------------------------------------------------
@@ -2214,12 +2803,15 @@ function showWorkspace(info) {
   if (info.difficulty) {
     pills.push(`<span class="pill pill-neutral">${icon("clock")}Difficulty: ${escapeHtml(info.difficulty)}</span>`);
   }
+  if (info.is_stage) {
+    pills.push(`<span class="pill pill-amber" title="Full screen. Leaving this window twice submits the lab.">Lab mode</span>`);
+  }
   if (info.duration_minutes) {
     pills.push(`<span class="pill pill-neutral">${icon("clock")}Est. Time: ${info.duration_minutes}m</span>`);
   }
 
   const actionButtons = info.is_stage
-    ? `<button class="ghost-icon" id="saveButton">${icon("save")}Save</button><button class="accent" id="submitButton">Submit ${icon("arrowRight")}</button>`
+    ? `<button class="ghost-icon" id="saveButton">${icon("save")}Save</button><span class="stage-nav" id="stageNav"></span>`
     : "";
 
   setScreen(
@@ -2271,14 +2863,78 @@ function showWorkspace(info) {
     { keepSidebar: true }
   );
 
-  renderWorkspaceHeaderExtra(info.duration_minutes, () => goBackFromWorkspace(info));
+  // Leaving the coding screen keeps the work: it is saved first, so coming
+  // back (to this stage or via Back/Next) shows the same code.
+  function saveNow() {
+    return api().log_code_edit(info.session_id, currentFiles(), activeFilename, false, true);
+  }
+  function leaveWorkspace() {
+    const saved = info.is_stage ? saveNow() : Promise.resolve();
+    saved.then(() => goBackFromWorkspace(info), () => goBackFromWorkspace(info));
+  }
+  function navigateToStage(stageId) {
+    saveNow().then(
+      () => startStage(stageId),
+      () => startStage(stageId)
+    );
+  }
+
+  nextRefresh = { topics: ["resources"], run: () => loadSessionResources(info) };
+  startLabMode(info, () => currentFiles());
+  renderWorkspaceHeaderExtra(info.duration_minutes, leaveWorkspace, info.elapsed_seconds || 0);
 
   if (info.is_stage) {
     api()
       .get_stages(info.task_id)
-      .then((data) => renderWorkspaceSidebar(info, data.stages));
+      .then((data) => {
+        renderWorkspaceSidebar(info, data.stages, navigateToStage, leaveWorkspace);
+        renderStageNav(data.stages);
+      });
   } else {
-    renderWorkspaceSidebar(info, null);
+    renderWorkspaceSidebar(info, null, null, null);
+  }
+
+  // Back / Next move between the lab's stages; only the last stage submits.
+  function renderStageNav(stages) {
+    const nav = document.getElementById("stageNav");
+    if (!nav) return;
+    const index = stages.findIndex((stage) => stage.id === info.stage_id);
+    const previous = stages[index - 1];
+    const next = stages[index + 1];
+    const name = (stage) => STAGE_LABELS[stage.stage_type] || stage.stage_type;
+    nav.innerHTML = `
+      ${previous ? `<button class="ghost-icon" id="previousStageButton">${icon("back")}${escapeHtml(name(previous))}</button>` : ""}
+      ${
+        next
+          ? `<button class="accent" id="nextStageButton">Next: ${escapeHtml(name(next))} ${icon("arrowRight")}</button>`
+          : `<button class="accent" id="submitButton">${stages.length > 1 ? "Submit Lab" : "Submit"} ${icon("arrowRight")}</button>`
+      }`;
+    if (previous) {
+      document.getElementById("previousStageButton").addEventListener("click", () => navigateToStage(previous.id));
+    }
+    if (next) {
+      document.getElementById("nextStageButton").addEventListener("click", () => navigateToStage(next.id));
+      return;
+    }
+    document.getElementById("submitButton").addEventListener("click", () => {
+      const doSubmit = () =>
+        api()
+          .submit_session(info.session_id, currentFiles())
+          .then(() => showSubmission(info.session_id))
+          .catch((err) => showToast(errorText(err)));
+      const proceed = () =>
+        info.stage_type === "ASSESSMENT" ? showConceptCheckModal(info.session_id, doSubmit) : doSubmit();
+      if (stages.length > 1) {
+        confirmModal({
+          title: "Submit the whole lab?",
+          message: `Your ${stages.map(name).join(", ")} work is submitted together. You can't change it afterwards.`,
+          confirmLabel: "Submit lab",
+          onConfirm: proceed,
+        });
+      } else {
+        proceed();
+      }
+    });
   }
 
   if (info.task_description) {
@@ -2395,6 +3051,10 @@ function showWorkspace(info) {
           });
       }, CODE_EDIT_DEBOUNCE_MS);
     });
+    // Anything pasted or dropped in is recorded, and the server notes whether it came from the AI.
+    editor.onPaste((text) => {
+      api().record_paste(info.session_id, text).catch(() => {});
+    });
     editor.onCursorMove((line, col) => {
       document.getElementById("cursorPosition").textContent = `Ln ${line}, Col ${col}`;
     });
@@ -2444,17 +3104,6 @@ function showWorkspace(info) {
     document.getElementById("saveButton").addEventListener("click", () => {
       api().log_code_edit(info.session_id, currentFiles(), activeFilename, false, true);
       autosaveIndicator.textContent = "Autosaved just now";
-    });
-    document.getElementById("submitButton").addEventListener("click", () => {
-      const doSubmit = () =>
-        api()
-          .submit_session(info.session_id, currentFiles())
-          .then(() => showSubmission(info.session_id));
-      if (info.stage_type === "ASSESSMENT") {
-        showConceptCheckModal(info.session_id, doSubmit);
-      } else {
-        doSubmit();
-      }
     });
   }
 
@@ -2585,7 +3234,8 @@ function renderChatPanel(container, info, getFiles) {
           transcript.innerHTML += `<div class="msg assistant"><b>Assistant:</b>${renderMarkdown(result.text)}</div>`;
           status.textContent = "Assistant ready";
         } else {
-          transcript.innerHTML += `<div class="msg assistant"><i>The assistant didn't respond — it may not be running.</i></div>`;
+          const why = result.text ? ` (${escapeHtml(String(result.text))})` : "";
+          transcript.innerHTML += `<div class="msg assistant"><i>The assistant didn't respond — it may not be running.${why}</i></div>`;
           status.textContent = "Assistant not available";
         }
         transcript.scrollTop = transcript.scrollHeight;
@@ -2775,29 +3425,16 @@ function signalChips(items, emptyText) {
     .join("");
 }
 
-function showMyProgress() {
-  setScreen(
-    `<div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
-     <div class="card"><p class="muted">Loading your progress&hellip; sessions that haven't been scored yet are scored now, which can take a moment.</p></div>`,
-    "progress"
-  );
-  api()
-    .get_my_progress()
-    .then((data) => {
-      const t = data.totals;
-      if (!t.sessions) {
-        setScreen(
-          `<div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
-           <div class="card"><h3>Nothing to show yet</h3><p class="muted">Submit your first lab or practice session and your progress will appear here.</p></div>`,
-          "progress"
-        );
-        return;
-      }
-      const stat = (label, value) =>
-        `<div class="card progress-stat"><div class="progress-stat-value">${value}</div><div class="muted">${label}</div></div>`;
-      const pillars = data.pillars
-        .map(
-          (p) => `
+// The progress charts and tables, shared by a student's own My Progress screen and
+// the professor's view of one student (``forProfessor`` swaps the Details button for
+// the student's submitted code).
+function progressBodyHtml(data, forProfessor) {
+  const t = data.totals;
+  const stat = (label, value) =>
+    `<div class="card progress-stat"><div class="progress-stat-value">${value}</div><div class="muted">${label}</div></div>`;
+  const pillars = data.pillars
+    .map(
+      (p) => `
         <div class="card pillar-progress">
           <h3>${escapeHtml(p.heading)}</h3>
           <div class="pillar-score">${p.latest === null ? "&ndash;" : Math.round(p.latest)}<span class="muted"> latest</span></div>
@@ -2805,26 +3442,23 @@ function showMyProgress() {
           <div>${trendBadge(p)}</div>
           <div class="muted">Average ${p.average === null ? "&ndash;" : Math.round(p.average)}</div>
         </div>`
-        )
-        .join("");
-      const kindLabel = { lab: "Lab", practice: "Practice", followup: "Follow-up" };
-      const rows = data.history
-        .map(
-          (h) => `
+    )
+    .join("");
+  const kindLabel = { lab: "Lab", practice: "Practice", followup: "Follow-up" };
+  const rows = data.history
+    .map(
+      (h) => `
         <tr>
           <td>${new Date(h.submitted_at).toLocaleDateString()}</td>
           <td>${escapeHtml(h.title)}${h.stage ? ` <span class="muted">&middot; ${escapeHtml(STAGE_LABELS[h.stage] || h.stage)}</span>` : ""}</td>
           <td>${kindLabel[h.kind] || h.kind}</td>
           <td>${h.ai_interactions}</td>
           <td>${h.score === null ? "&ndash;" : Math.round(h.score)}</td>
-          <td><button class="ghost progress-detail" data-session-id="${h.session_id}">Details</button></td>
+          <td><button class="ghost progress-detail" data-session-id="${h.session_id}">${forProfessor ? "View code" : "Details"}</button></td>
         </tr>`
-        )
-        .join("");
-
-      setScreen(
-        `
-        <div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>
+    )
+    .join("");
+  return `
         <div class="progress-stat-grid">
           ${stat("Sessions submitted", t.sessions)}
           ${stat("Labs attempted", t.labs)}
@@ -2848,14 +3482,132 @@ function showMyProgress() {
             <tbody>${rows}</tbody>
           </table>
           <p class="muted" style="margin-top:10px;">CIQ here is a provisional equal-weight average of the signals available for each session, not a validated grade.</p>
-        </div>
-      `,
-        "progress"
-      );
+        </div>`;
+}
+
+function showMyProgress() {
+  const heading = `<div class="page-heading"><div><h1>My Progress</h1><p class="subtitle">How your learning is developing across sessions.</p></div></div>`;
+  setScreen(
+    `${heading}
+     <div class="card"><p class="muted">Loading your progress&hellip; sessions that haven't been scored yet are scored now, which can take a moment.</p></div>`,
+    "progress"
+  );
+  api()
+    .get_my_progress()
+    .then((data) => {
+      if (!data.totals.sessions) {
+        setScreen(
+          `${heading}
+           <div class="card"><h3>Nothing to show yet</h3><p class="muted">Submit your first lab or practice session and your progress will appear here.</p></div>`,
+          "progress"
+        );
+        return;
+      }
+      setScreen(`${heading}${progressBodyHtml(data, false)}`, "progress");
       app.querySelectorAll(".progress-detail").forEach((button) => {
         button.addEventListener("click", () => showCiqScore(Number(button.dataset.sessionId)));
       });
     });
+}
+
+// A professor looking at one student's progress: the same charts the student sees.
+function showStudentProgress(studentId, backLabel = "Back to My Class", back = showStudents) {
+  setScreen(
+    `<button class="back-link" id="progressBack">${icon("back")}${escapeHtml(backLabel)}</button>
+     <div class="card"><p class="muted">Loading progress&hellip; sessions that haven't been scored yet are scored now, which can take a moment.</p></div>`,
+    "students"
+  );
+  document.getElementById("progressBack").addEventListener("click", back);
+  api()
+    .get_student_progress(studentId)
+    .then((data) => {
+      const place = [data.student.course, data.student.year_label, data.student.division && `Div ${data.student.division}`, data.student.batch && `Batch ${data.student.batch}`]
+        .filter(Boolean)
+        .join(" · ");
+      const heading = `<button class="back-link" id="progressBack">${icon("back")}${escapeHtml(backLabel)}</button>
+        <div class="page-heading"><div><h1>${escapeHtml(data.student.name)}</h1><p class="subtitle">${escapeHtml(place || "No course set")}${data.student.roll_number ? ` &middot; Roll ${escapeHtml(data.student.roll_number)}` : ""}</p></div></div>`;
+      const body = data.totals.sessions
+        ? progressBodyHtml(data, true)
+        : `<div class="card"><h3>Nothing to show yet</h3><p class="muted">${escapeHtml(data.student.name)} hasn't submitted a lab or practice session yet.</p></div>`;
+      setScreen(heading + body, "students");
+      document.getElementById("progressBack").addEventListener("click", back);
+      app.querySelectorAll(".progress-detail").forEach((button) => {
+        button.addEventListener("click", () =>
+          api()
+            .get_session_submission(Number(button.dataset.sessionId))
+            .then((work) => showStudentWork(work, () => showStudentProgress(studentId, backLabel, back), "Back to progress"))
+            .catch((err) => showToast(errorText(err)))
+        );
+      });
+    })
+    .catch((err) => {
+      showToast(errorText(err));
+      back();
+    });
+}
+
+// A student's submitted code and the output of their last run, stage by stage.
+function showStudentWork(work, back, backLabel = "Back") {
+  const stageName = (type) => STAGE_LABELS[type] || "Submission";
+  const place = [work.student.course, work.student.year_label, work.student.division && `Div ${work.student.division}`, work.student.batch && `Batch ${work.student.batch}`]
+    .filter(Boolean)
+    .join(" · ");
+  setScreen(
+    `<button class="back-link" id="workBack">${icon("back")}${escapeHtml(backLabel)}</button>
+     <div class="page-heading"><div><h1>${escapeHtml(work.student.name)}</h1>
+       <p class="subtitle">${escapeHtml(work.task_title)}${place ? ` &middot; ${escapeHtml(place)}` : ""}${work.score === null ? "" : ` &middot; CIQ ${work.score}`}</p></div></div>
+     <div class="stage-tabs" id="workStageTabs">${work.stages
+       .map(
+         (stage, index) =>
+           `<button class="stage-tab ${index === work.stages.length - 1 ? "active" : ""}" data-index="${index}">${escapeHtml(stageName(stage.stage_type))}${stage.submitted ? "" : " <span class='muted'>(not submitted)</span>"}</button>`
+       )
+       .join("")}</div>
+     <div id="workStage"></div>`,
+    "reports"
+  );
+  document.getElementById("workBack").addEventListener("click", back);
+  const showStage = (index) => {
+    const stage = work.stages[index];
+    document.querySelectorAll("#workStageTabs .stage-tab").forEach((tab, i) => tab.classList.toggle("active", i === index));
+    const names = Object.keys(stage.files);
+    const out = stage.output;
+    document.getElementById("workStage").innerHTML = `
+      <div class="muted work-meta">${
+        stage.submitted_at ? `Submitted ${escapeHtml(new Date(stage.submitted_at).toLocaleString())}` : "Not submitted"
+      } &middot; ${stage.ai_chats} AI chat${stage.ai_chats === 1 ? "" : "s"}${
+        stage.pastes.ai + stage.pastes.other
+          ? ` &middot; <span class="paste-flag">pasted ${stage.pastes.ai ? `${stage.pastes.ai}\u00d7 from the AI (${stage.pastes.ai_chars} chars)` : ""}${stage.pastes.ai && stage.pastes.other ? ", " : ""}${stage.pastes.other ? `${stage.pastes.other}\u00d7 from elsewhere (${stage.pastes.other_chars} chars)` : ""}</span>`
+          : ""
+      }${stage.focus_losses ? ` &middot; <span class="paste-flag">left the lab window ${stage.focus_losses}\u00d7</span>` : ""}</div>
+      ${stage.note ? `<div class="notice notice-warn" style="margin:0 0 10px;">${escapeHtml(stage.note)}</div>` : ""}
+      ${
+        names.length
+          ? names
+              .map(
+                (name) => `<div class="card work-file"><div class="work-file-name">${icon("file")}${escapeHtml(name)}</div><pre class="code-view">${escapeHtml(stage.files[name] || "(empty)")}</pre></div>`
+              )
+              .join("")
+          : `<div class="card"><p class="muted">No code was saved for this stage.</p></div>`
+      }
+      <div class="card work-output">
+        <div class="work-file-name">Output of the last run</div>
+        ${
+          out
+            ? `<pre class="code-view output-view">${escapeHtml(out.stdout || "")}${out.stderr ? `<span class="output-error">${escapeHtml(out.stderr)}</span>` : ""}${out.timed_out ? `<span class="output-error">\n(timed out)</span>` : ""}${!out.stdout && !out.stderr && !out.timed_out ? "(no output)" : ""}</pre>`
+            : `<p class="muted">The student never ran this code.</p>`
+        }
+      </div>
+      ${
+        stage.explanation
+          ? `<div class="card"><div class="work-file-name">Explanation they wrote before submitting</div><p class="muted">${escapeHtml(stage.explanation.question)}</p><p style="white-space:pre-wrap">${escapeHtml(stage.explanation.response)}</p></div>`
+          : ""
+      }`;
+  };
+  document.querySelectorAll("#workStageTabs .stage-tab").forEach((tab) =>
+    tab.addEventListener("click", () => showStage(Number(tab.dataset.index)))
+  );
+  if (work.stages.length) showStage(work.stages.length - 1);
+  else document.getElementById("workStage").innerHTML = `<div class="card"><p class="muted">Nothing has been saved yet.</p></div>`;
 }
 
 // -- Live updates -------------------------------------------------------------

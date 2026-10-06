@@ -56,6 +56,8 @@ class EventType(enum.StrEnum):
     AI_CODE_ADOPT = "AI_CODE_ADOPT"
     AI_CODE_MODIFY = "AI_CODE_MODIFY"
     SUBMISSION = "SUBMISSION"
+    PASTE = "PASTE"  # text pasted (or dropped) into the editor; payload says where from
+    FOCUS_LOST = "FOCUS_LOST"  # the lab window lost focus while a lab was being taken
 
 
 class StageType(enum.StrEnum):
@@ -134,6 +136,15 @@ class Student(Base):
     # yet). Only that professor, or an admin, manages the student's class
     # membership and can share resources with them.
     professor_id: Mapped[int | None] = mapped_column(ForeignKey("professors.id"), nullable=True)
+    # Where the student sits in the institution (chosen at sign-up from the
+    # lists an administrator maintains; see ``Course``). All optional so
+    # accounts made before these existed stay valid.
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id"), nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1 = first year
+    division: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    roll_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    course: Mapped[Course | None] = relationship(foreign_keys=[course_id])
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -185,6 +196,64 @@ class Admin(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Course(Base):
+    """A programme students enrol in (e.g. a 3-year degree, a 2-year master's).
+
+    Maintained by an administrator. ``years`` is how many years the programme
+    runs, which is what a student's *Year* choice is limited to.
+    """
+
+    __tablename__ = "courses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    years: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+
+    options: Mapped[list[CourseOption]] = relationship(
+        back_populates="course", cascade="all, delete-orphan", order_by="CourseOption.name"
+    )
+
+
+class CourseOption(Base):
+    """One allowed value for a course's *division* or *batch* dropdown."""
+
+    __tablename__ = "course_options"
+    __table_args__ = (UniqueConstraint("course_id", "kind", "name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # "division" | "batch"
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    course: Mapped[Course] = relationship(back_populates="options")
+
+
+class ProfessorCourse(Base):
+    """A course an administrator has assigned to a professor (they may teach it)."""
+
+    __tablename__ = "professor_courses"
+
+    professor_id: Mapped[int] = mapped_column(ForeignKey("professors.id"), primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), primary_key=True)
+
+
+class ProfessorClass(Base):
+    """A group a professor has taken into their class: a course, narrowed by year/division/batch.
+
+    Students matching it are put in the professor's class when it is added,
+    and when they sign up later. ``None`` means "any".
+    """
+
+    __tablename__ = "professor_classes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    professor_id: Mapped[int] = mapped_column(ForeignKey("professors.id"), nullable=False)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    division: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
 class Task(Base):
     """A coding task/lab a session attempts.
 
@@ -213,6 +282,13 @@ class Task(Base):
     course: Mapped[str | None] = mapped_column(String(200), nullable=True)
     division: Mapped[str | None] = mapped_column(String(50), nullable=True)
     batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Who may see the lab. With ``course_id`` set, only students of that
+    # course (and ``year`` / ``division`` / ``batch`` when those are set).
+    # Otherwise the lab goes to its professor's class, and a lab with neither
+    # (the demo labs) is visible to everyone.
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id"), nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    professor_id: Mapped[int | None] = mapped_column(ForeignKey("professors.id"), nullable=True)
     # Set only on a follow-on Task a professor spun off from an existing Lab
     # to collect Knowledge Transfer / Retention evidence — see
     # ``AssessmentKind``. ``None`` for every ordinary Lab or Practice task.
@@ -272,6 +348,12 @@ class Session(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How often the student left the lab window during this session, and why a
+    # lab was submitted for them ("focus": they left it twice) rather than by them.
+    focus_losses: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    submit_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     student: Mapped[Student] = relationship(back_populates="sessions")
     task: Mapped[Task] = relationship(back_populates="sessions")

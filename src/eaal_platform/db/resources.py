@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform.db import academics
 from eaal_platform.db.models import (
     Professor,
     Resource,
@@ -98,6 +99,8 @@ def _student_row(student: Student, professor_name: str | None = None) -> dict[st
         "must_change_password": student.must_change_password,
         "professor_id": student.professor_id,
         "professor_name": professor_name,
+        **academics.describe(student),
+        "course_id": student.course_id,
     }
 
 

@@ -39,7 +39,7 @@ from sqlalchemy.engine import Row
 from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
-from eaal_platform.db import approval_import, approvals
+from eaal_platform.db import academics, approval_import, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     create_professor_account,
@@ -55,10 +55,13 @@ from eaal_platform.db.models import (
     AuditLog,
     Base,
     CodeSnapshot,
+    Course,
     Event,
     EventType,
     ExecutionResult,
     Professor,
+    ProfessorClass,
+    ProfessorCourse,
     Resource,
     ResourceKind,
     ResourceLab,
@@ -172,10 +175,45 @@ class DisableRequest(UserRef):
     disabled: bool
 
 
+class CohortRequest(BaseModel):
+    """A student's place: course, year, division, batch and roll number."""
+
+    course_id: int | None = None
+    year: int | None = None
+    division: str | None = None
+    batch: str | None = None
+    roll_number: str | None = None
+
+
+class CourseRequest(BaseModel):
+    name: str
+    years: int
+
+
+class CourseUpdateRequest(CourseRequest):
+    id: int
+
+
+class OptionRequest(BaseModel):
+    course_id: int
+    kind: str
+    name: str
+
+
+class ProfessorCoursesRequest(BaseModel):
+    professor_id: int
+    course_ids: list[int]
+
+
+class IdRequest(BaseModel):
+    id: int
+
+
 class UpdateUserRequest(UserRef):
     name: str | None = None
     email: str | None = None
     enrollment_no: str | None = None
+    cohort: CohortRequest | None = None
     new_password: str | None = None
     must_change_password: bool = False
 
@@ -210,6 +248,7 @@ class CreateUserRequest(BaseModel):
     email: str
     password: str
     enrollment_no: str | None = None
+    cohort: CohortRequest | None = None
 
 
 class AiRequest(BaseModel):
@@ -401,6 +440,8 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     "must_change_password": s.must_change_password,
                     "disabled": s.disabled,
                     "professor_id": s.professor_id,
+                    **academics.describe(s),
+                    "course_id": s.course_id,
                     "online": ("student", s.id) in online,
                     "created_at": _jsonable(s.created_at),
                 }
@@ -414,6 +455,13 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     "must_change_password": p.must_change_password,
                     "disabled": p.disabled,
                     "students": db.query(Student).filter_by(professor_id=p.id).count(),
+                    "courses": [
+                        c.name
+                        for c in db.query(Course)
+                        .join(ProfessorCourse, ProfessorCourse.course_id == Course.id)
+                        .filter(ProfessorCourse.professor_id == p.id)
+                        .order_by(Course.name)
+                    ],
                     "resources": db.query(Resource).filter_by(professor_id=p.id).count(),
                     "online": ("professor", p.id) in online,
                     "created_at": _jsonable(p.created_at),
@@ -451,12 +499,18 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
             raise HTTPException(status_code=400, detail=problem)
         try:
             if request.role == "student":
+                place = (
+                    academics.signup_cohort(state.session_factory, request.cohort.model_dump())
+                    if request.cohort and request.cohort.course_id
+                    else None
+                )
                 new_id = create_student_account(
                     state.session_factory,
                     display_name=request.name.strip(),
                     email=request.email.strip(),
                     password=request.password,
                     enrollment_no=request.enrollment_no,
+                    cohort=place,
                 )
             elif request.role == "professor":
                 new_id = create_professor_account(
@@ -467,7 +521,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                 )
             else:
                 raise HTTPException(status_code=400, detail="Unknown role.")
-        except ValueError as exc:
+        except ValueError as exc:  # includes academics.AcademicError
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         audit(admin, "create_account", f"{request.role}#{new_id}")
         state.bump(TOPIC_ACCOUNTS)
@@ -503,6 +557,14 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                 account.must_change_password = request.must_change_password
                 changed.append("password")
             db.commit()
+        if request.cohort is not None and request.role == "student":
+            try:
+                academics.set_student_cohort(
+                    state.session_factory, request.id, request.cohort.model_dump()
+                )
+            except academics.AcademicError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            changed.append("course details")
         # Credentials changed: any open session of this account is now stale.
         signed_out = 0
         if {"email", "password"} & set(changed):
@@ -555,6 +617,10 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                 for student in db.query(Student).filter_by(professor_id=account.id):
                     student.professor_id = None
                 resource_store.delete_professor_resources(db, account.id)
+                db.query(ProfessorCourse).filter_by(professor_id=account.id).delete()
+                db.query(ProfessorClass).filter_by(professor_id=account.id).delete()
+                for lab in db.query(Task).filter_by(professor_id=account.id):
+                    lab.professor_id = None
                 db.flush()  # children first: the database enforces the foreign keys
             db.delete(account)
             db.commit()
@@ -562,6 +628,116 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         audit(admin, "delete_account", label)
         state.bump(TOPIC_ACCOUNTS)
         return {"ok": True}
+
+    # -- courses, years, divisions, batches; which professor teaches what ------------
+
+    def course_action(admin: _AdminSession, action: str, detail: str, work: Any) -> dict[str, Any]:
+        try:
+            result = work()
+        except academics.AcademicError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, action, detail)
+        state.bump(TOPIC_ACCOUNTS)
+        state.bump(TOPIC_LABS)
+        return {"ok": True, "result": result}
+
+    @router.get("/courses")
+    def courses(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        with state.session_factory() as db:
+            professors = [
+                {"id": p.id, "name": p.display_name}
+                for p in db.query(Professor).order_by(Professor.display_name)
+            ]
+        return {
+            "courses": academics.list_courses_with_staff(state.session_factory),
+            "professors": professors,
+            "suggested": [{"name": n, "years": y} for n, y in academics.SUGGESTED_COURSES],
+        }
+
+    @router.post("/courses/add")
+    def course_add(
+        request: CourseRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "add_course",
+            request.name,
+            lambda: academics.add_course(state.session_factory, request.name, request.years),
+        )
+
+    @router.post("/courses/add-suggested")
+    def course_add_suggested(admin: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        def work() -> int:
+            have = {c["name"].lower() for c in academics.list_courses(state.session_factory)}
+            added = 0
+            for name, years in academics.SUGGESTED_COURSES:
+                if name.lower() not in have:
+                    academics.add_course(state.session_factory, name, years)
+                    added += 1
+            return added
+
+        return course_action(admin, "add_suggested_courses", "", work)
+
+    @router.post("/courses/update")
+    def course_update(
+        request: CourseUpdateRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "update_course",
+            f"#{request.id} {request.name}",
+            lambda: academics.update_course(
+                state.session_factory, request.id, request.name, request.years
+            ),
+        )
+
+    @router.post("/courses/delete")
+    def course_delete(
+        request: IdRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "delete_course",
+            f"#{request.id}",
+            lambda: academics.delete_course(state.session_factory, request.id),
+        )
+
+    @router.post("/courses/options/add")
+    def option_add(
+        request: OptionRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "add_course_option",
+            f"course#{request.course_id} {request.kind} {request.name}",
+            lambda: academics.add_option(
+                state.session_factory, request.course_id, request.kind, request.name
+            ),
+        )
+
+    @router.post("/courses/options/remove")
+    def option_remove(
+        request: IdRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "remove_course_option",
+            f"#{request.id}",
+            lambda: academics.remove_option(state.session_factory, request.id),
+        )
+
+    @router.post("/courses/professors")
+    def course_professors(
+        request: ProfessorCoursesRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return course_action(
+            admin,
+            "set_professor_courses",
+            f"professor#{request.professor_id}: {request.course_ids}",
+            lambda: academics.set_professor_courses(
+                state.session_factory, request.professor_id, request.course_ids
+            ),
+        )
 
     @router.post("/signed-in/{client_id}/sign-out")
     def sign_out_one(

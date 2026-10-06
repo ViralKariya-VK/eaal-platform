@@ -402,3 +402,37 @@ td:has(.row-actions) {
   padding: 4px 10px;
   font-size: 12px;
 }
+
+/* courses */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.chip-x {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 15px;
+  cursor: pointer;
+}
+.inline-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inline-add input,
+.inline-add select {
+  max-width: 240px;
+}
+.course-card h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #6b7280);
+}
