@@ -504,13 +504,14 @@ class CavyApi:
         return resource_store.class_students(self._session_factory, self._require_professor_id())
 
     def get_unassigned_students(self) -> list[dict[str, Any]]:
-        """Students not in anyone's class yet: the ones a professor may add to theirs.
+        """Students not in this professor's class yet (being in other classes is fine).
 
-        On a server a professor can only add students of the courses an
-        administrator assigned to them.
+        On a server a professor can only add students of the courses they teach.
         """
         professor_id = self._require_professor_id()
-        rows = resource_store.unassigned_students(self._session_factory)
+        rows: list[dict[str, Any]] = resource_store.addable_students(
+            self._session_factory, professor_id
+        )
         if self._restrict_signup:
             mine = academics.professor_course_ids(self._session_factory, professor_id)
             rows = [row for row in rows if row["course_id"] in mine]
@@ -608,7 +609,9 @@ class CavyApi:
         professor_id = self._require_professor_id()
         with self._session_factory() as db_session:
             student = db_session.get(Student, student_id)
-            if student is None or student.professor_id != professor_id:
+            if student is None or not resource_store.is_member(
+                db_session, student_id, professor_id
+            ):
                 return {"ok": False, "error": "That student isn't in your class."}
         try:
             temporary = reset_student_password_row(self._session_factory, student_id)
@@ -1946,7 +1949,9 @@ class CavyApi:
         self, db_session: OrmSession, professor_id: int, student: Student, task: Task | None = None
     ) -> bool:
         """A professor sees their own class, and (on a server) students doing their labs."""
-        if not self._restrict_signup or student.professor_id == professor_id:
+        if not self._restrict_signup or resource_store.is_member(
+            db_session, student.id, professor_id
+        ):
             return True
         if task is None:
             return False

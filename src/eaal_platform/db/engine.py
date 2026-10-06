@@ -124,11 +124,23 @@ def _give_courses_codes(engine: Engine) -> None:
         )
 
 
+def _copy_single_professors(engine: Engine) -> None:
+    """Older databases gave each student one professor; make those class memberships."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT OR IGNORE INTO class_members (student_id, professor_id) "
+                "SELECT id, professor_id FROM students WHERE professor_id IS NOT NULL"
+            )
+        )
+
+
 def init_db(engine: Engine) -> None:
     """Create all tables that don't already exist, and upgrade older files."""
     Base.metadata.create_all(engine)
     _add_missing_columns(engine)
     _give_courses_codes(engine)
+    _copy_single_professors(engine)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

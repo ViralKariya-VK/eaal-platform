@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.db.models import (
+    ClassMember,
     Course,
     CourseOption,
     Professor,
@@ -359,6 +360,9 @@ def course_roster(
     """The students of one course and whose class each is in (for the admin panel)."""
     with session_factory() as db:
         names = {p.id: p.display_name for p in db.query(Professor)}
+        links: dict[int, list[str]] = {}
+        for link in db.query(ClassMember):
+            links.setdefault(link.student_id, []).append(names.get(link.professor_id, "?"))
         rows = (
             db.query(Student)
             .filter(Student.course_id == course_id, Student.email.is_not(None))
@@ -374,7 +378,7 @@ def course_roster(
                 "division": s.division,
                 "batch": s.batch,
                 "roll_number": s.roll_number,
-                "teacher": names.get(s.professor_id) if s.professor_id else None,
+                "teacher": ", ".join(sorted(links.get(s.id, []))) or None,
             }
             for s in rows
         ]
@@ -482,7 +486,7 @@ def lab_visible_to(student: Student, task: Task) -> bool:
             and (task.batch is None or student.batch == task.batch)
         )
     if task.professor_id is not None:
-        return student.professor_id == task.professor_id
+        return any(link.professor_id == task.professor_id for link in student.class_links)
     return True
 
 
@@ -531,13 +535,13 @@ def preview_group(
         students = _matching(
             db, target["course_id"], target["year"], target["division"], target["batch"]
         ).all()
+        mine = {
+            link.student_id for link in db.query(ClassMember).filter_by(professor_id=professor_id)
+        }
         return {
             "matching": len(students),
-            "to_add": sum(1 for s in students if s.professor_id is None),
-            "already_yours": sum(1 for s in students if s.professor_id == professor_id),
-            "in_other_class": sum(
-                1 for s in students if s.professor_id not in (None, professor_id)
-            ),
+            "to_add": sum(1 for s in students if s.id not in mine),
+            "already_yours": sum(1 for s in students if s.id in mine),
         }
 
 
@@ -574,17 +578,18 @@ def add_group(
                     batch=target["batch"],
                 )
             )
-        added = skipped = 0
+        mine = {
+            link.student_id for link in db.query(ClassMember).filter_by(professor_id=professor_id)
+        }
+        added = 0
         for student in _matching(
             db, target["course_id"], target["year"], target["division"], target["batch"]
         ):
-            if student.professor_id is None:
-                student.professor_id = professor_id
+            if student.id not in mine:
+                db.add(ClassMember(student_id=student.id, professor_id=professor_id))
                 added += 1
-            elif student.professor_id != professor_id:
-                skipped += 1
         db.commit()
-    return {"added": added, "in_other_class": skipped}
+    return {"added": added}
 
 
 def professor_groups(
@@ -605,7 +610,8 @@ def professor_groups(
                     "id": rule.id,
                     "label": _group_label(course, rule.year, rule.division, rule.batch),
                     "students": _matching(db, rule.course_id, rule.year, rule.division, rule.batch)
-                    .filter(Student.professor_id == professor_id)
+                    .join(ClassMember, ClassMember.student_id == Student.id)
+                    .filter(ClassMember.professor_id == professor_id)
                     .count(),
                 }
             )
@@ -625,27 +631,28 @@ def remove_group(
 
 
 def assign_by_groups(session_factory: sessionmaker[OrmSession], student_id: int) -> None:
-    """Put a student with no class into the first professor whose group they belong to."""
+    """Put a student in the class of every professor with a group they belong to."""
     with session_factory() as db:
         student = db.get(Student, student_id)
-        if student is None or student.professor_id is not None or student.course_id is None:
+        if student is None or student.course_id is None:
             return
         rules = (
             db.query(ProfessorClass)
             .join(Professor, Professor.id == ProfessorClass.professor_id)
             .filter(ProfessorClass.course_id == student.course_id, Professor.disabled.is_(False))
-            .order_by(ProfessorClass.id)
             .all()
         )
+        have = {link.professor_id for link in student.class_links}
         for rule in rules:
             if (
-                (rule.year is None or rule.year == student.year)
+                rule.professor_id not in have
+                and (rule.year is None or rule.year == student.year)
                 and (rule.division is None or rule.division == student.division)
                 and (rule.batch is None or rule.batch == student.batch)
             ):
-                student.professor_id = rule.professor_id
-                db.commit()
-                return
+                db.add(ClassMember(student_id=student_id, professor_id=rule.professor_id))
+                have.add(rule.professor_id)
+        db.commit()
 
 
 def set_student_cohort(

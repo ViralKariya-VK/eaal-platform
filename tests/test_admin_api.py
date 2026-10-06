@@ -619,7 +619,7 @@ def test_admin_assigns_students_and_the_access_rules_follow(
     )
 
     ok = http.post(
-        "/admin/api/users/assign", json={"student_id": sid, "professor_id": p1}, headers=admin
+        "/admin/api/users/assign", json={"student_id": sid, "professor_ids": [p1]}, headers=admin
     )
     assert ok.status_code == 200
     seen = http.post("/api/call/get_student_resources", json={"args": []}, headers=student).json()[
@@ -628,24 +628,40 @@ def test_admin_assigns_students_and_the_access_rules_follow(
     assert [r["title"] for r in seen] == ["Hello"]
 
     http.post(
-        "/admin/api/users/assign", json={"student_id": sid, "professor_id": p2}, headers=admin
+        "/admin/api/users/assign", json={"student_id": sid, "professor_ids": [p2]}, headers=admin
     )
     gone = http.post("/api/call/get_student_resources", json={"args": []}, headers=student).json()[
         "result"
     ]
     assert gone == []
     users = http.get("/admin/api/users", headers=admin).json()
-    assert users["students"][0]["professor_id"] == p2
+    assert users["students"][0]["professor_ids"] == [p2]
     assert {p["name"]: p["students"] for p in users["professors"]} == {"P1": 0, "P2": 1}
 
+    # A student has a professor for each subject, so several are allowed.
+    http.post(
+        "/admin/api/users/assign",
+        json={"student_id": sid, "professor_ids": [p1, p2]},
+        headers=admin,
+    )
+    assert http.get("/admin/api/users", headers=admin).json()["students"][0][
+        "professor_ids"
+    ] == sorted([p1, p2])
+    assert [
+        r["title"]
+        for r in http.post(
+            "/api/call/get_student_resources", json={"args": []}, headers=student
+        ).json()["result"]
+    ] == ["Hello"]
+
     bad = http.post(
-        "/admin/api/users/assign", json={"student_id": sid, "professor_id": 999}, headers=admin
+        "/admin/api/users/assign", json={"student_id": sid, "professor_ids": [999]}, headers=admin
     )
     assert bad.status_code == 400
     http.post(
-        "/admin/api/users/assign", json={"student_id": sid, "professor_id": None}, headers=admin
+        "/admin/api/users/assign", json={"student_id": sid, "professor_ids": []}, headers=admin
     )
-    assert http.get("/admin/api/users", headers=admin).json()["students"][0]["professor_id"] is None
+    assert http.get("/admin/api/users", headers=admin).json()["students"][0]["professor_ids"] == []
 
 
 def test_resources_wake_listeners_and_appear_in_the_admin_list(
@@ -722,7 +738,7 @@ def test_deleting_a_professor_frees_their_students_and_removes_their_material(
         state.session_factory, display_name="S", email="s@x.com", password=_PASSWORD
     )
     http.post(
-        "/admin/api/users/assign", json={"student_id": sid, "professor_id": pid}, headers=admin
+        "/admin/api/users/assign", json={"student_id": sid, "professor_ids": [pid]}, headers=admin
     )
     prof = _app_login(http, "professor", "p1@x.com")
     http.post("/api/call/create_resource", json={"args": [_note_spec("Gone soon")]}, headers=prof)
@@ -733,4 +749,4 @@ def test_deleting_a_professor_frees_their_students_and_removes_their_material(
 
     assert done.status_code == 200
     assert http.get("/admin/api/resources", headers=admin).json() == []
-    assert http.get("/admin/api/users", headers=admin).json()["students"][0]["professor_id"] is None
+    assert http.get("/admin/api/users", headers=admin).json()["students"][0]["professor_ids"] == []

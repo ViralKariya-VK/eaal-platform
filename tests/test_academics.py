@@ -19,7 +19,7 @@ from eaal_platform.db.bootstrap import (
     create_student_account,
     seed_demo_content,
 )
-from eaal_platform.db.models import Student
+from eaal_platform.db.models import ClassMember
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.app import ServerState, create_app
 
@@ -205,11 +205,18 @@ def school(db_session_factory: Factory) -> dict[str, Any]:
     return {"course": course_id, "a": prof_a, "b": prof_b, "students": students}
 
 
-def _owner(factory: Factory, student_id: int) -> int | None:
+def _owner(factory: Factory, student_id: int) -> list[int]:
+    """The professors whose classes this student is in (a student can be in several)."""
     with factory() as db:
-        student = db.get(Student, student_id)
-        assert student is not None
-        return student.professor_id
+        return sorted(
+            link.professor_id for link in db.query(ClassMember).filter_by(student_id=student_id)
+        )
+
+
+def _join(factory: Factory, student_id: int, professor_id: int) -> None:
+    with factory() as db:
+        db.add(ClassMember(student_id=student_id, professor_id=professor_id))
+        db.commit()
 
 
 def test_a_professor_takes_a_group_into_their_class(
@@ -226,15 +233,17 @@ def test_a_professor_takes_a_group_into_their_class(
         every_course=False,
     )
     s = school["students"]
-    assert [_owner(db_session_factory, s[n]) for n in ("s1", "s2", "s3")] == [school["a"]] * 2 + [
-        None
+    assert [_owner(db_session_factory, s[n]) for n in ("s1", "s2", "s3")] == [
+        [school["a"]],
+        [school["a"]],
+        [],
     ]
     labels = [g["label"] for g in academics.professor_groups(db_session_factory, school["a"])]
     code = academics.list_courses(db_session_factory)[0]["code"]
     assert labels == [f"Engineering ({code}) · First Year · all divisions · all batches"]
 
 
-def test_only_assigned_courses_and_only_unclaimed_students(
+def test_only_assigned_courses_and_a_student_can_have_several_professors(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
     with pytest.raises(AcademicError, match="haven't been assigned"):
@@ -242,19 +251,15 @@ def test_only_assigned_courses_and_only_unclaimed_students(
             db_session_factory, school["b"], {"course_id": school["course"]}, every_course=False
         )
     s = school["students"]
-    with db_session_factory() as db:
-        student = db.get(Student, s["s1"])
-        assert student is not None
-        student.professor_id = school["b"]
-        db.commit()
+    _join(db_session_factory, s["s1"], school["b"])  # already in Dr B's class (another subject)
     academics.add_group(
         db_session_factory,
         school["a"],
         {"course_id": school["course"], "year": 1},
         every_course=False,
     )
-    assert _owner(db_session_factory, s["s1"]) == school["b"]  # not taken from Dr B
-    assert _owner(db_session_factory, s["s2"]) == school["a"]
+    assert _owner(db_session_factory, s["s1"]) == sorted([school["a"], school["b"]])  # both
+    assert _owner(db_session_factory, s["s2"]) == [school["a"]]
 
 
 def test_students_who_sign_up_later_join_the_group(
@@ -280,8 +285,8 @@ def test_students_who_sign_up_later_join_the_group(
         password=_PW,
         cohort=academics.signup_cohort(db_session_factory, _place(school["course"], 1, "B", "B1")),
     )
-    assert _owner(db_session_factory, late) == school["a"]
-    assert _owner(db_session_factory, other) is None
+    assert _owner(db_session_factory, late) == [school["a"]]
+    assert _owner(db_session_factory, other) == []
 
     rule = academics.professor_groups(db_session_factory, school["a"])[0]["id"]
     academics.remove_group(db_session_factory, school["a"], rule)
@@ -292,7 +297,7 @@ def test_students_who_sign_up_later_join_the_group(
         password=_PW,
         cohort=academics.signup_cohort(db_session_factory, _place(school["course"], 1, "A", "A2")),
     )
-    assert _owner(db_session_factory, again) is None
+    assert _owner(db_session_factory, again) == []
 
 
 def test_taking_courses_away_stops_the_group(
@@ -374,11 +379,7 @@ def test_a_professor_must_aim_a_lab_at_one_of_their_courses(
     mine = _server_api(db_session_factory)
     mine.login("student", "s1@x.com", _PW)
     assert "Targeted lab" not in {lab["title"] for lab in mine.get_labs()}
-    with db_session_factory() as db:
-        student = db.get(Student, school["students"]["s1"])
-        assert student is not None
-        student.professor_id = school["b"]
-        db.commit()
+    _join(db_session_factory, school["students"]["s1"], school["b"])
     assert "Targeted lab" in {lab["title"] for lab in mine.get_labs()}
 
 
@@ -542,11 +543,11 @@ def test_teaching_a_course_brings_in_its_students_now_and_later(
     other = create_professor_account(
         db_session_factory, display_name="Dr B", email="b@x.com", password=_PW
     )
-    assert [_owner(db_session_factory, s) for s in early] == [None, None, None]
+    assert [_owner(db_session_factory, s) for s in early] == [[], [], []]
 
     result = academics.set_professor_courses(db_session_factory, prof, [course])
     assert result == {"added_students": 3}
-    assert [_owner(db_session_factory, s) for s in early] == [prof] * 3
+    assert [_owner(db_session_factory, s) for s in early] == [[prof]] * 3
 
     later = create_student_account(
         db_session_factory,
@@ -555,16 +556,18 @@ def test_teaching_a_course_brings_in_its_students_now_and_later(
         password=_PW,
         cohort=academics.signup_cohort(db_session_factory, _place(course, 2)),
     )
-    assert _owner(db_session_factory, later) == prof
+    assert _owner(db_session_factory, later) == [prof]
 
-    # Re-saving the same course adds nobody twice; a second professor takes nobody's students.
+    # Re-saving the same course adds nobody twice.
     assert academics.set_professor_courses(db_session_factory, prof, [course]) == {
         "added_students": 0
     }
+    # A second professor teaching the same course gets the students too: a student has a
+    # professor for every subject, so being in Dr A's class doesn't keep them out of Dr B's.
     assert academics.set_professor_courses(db_session_factory, other, [course]) == {
-        "added_students": 0
+        "added_students": 4
     }
-    assert _owner(db_session_factory, early[0]) == prof
+    assert _owner(db_session_factory, early[0]) == sorted([prof, other])
 
 
 def test_a_professor_picks_their_own_courses(db_session_factory: Factory) -> None:
@@ -588,7 +591,7 @@ def test_a_professor_picks_their_own_courses(db_session_factory: Factory) -> Non
 
     done = teacher.set_my_courses([course])
     assert done == {"ok": True, "added_students": 1}
-    assert _owner(db_session_factory, student) == teacher._current_professor_id
+    assert _owner(db_session_factory, student) == [teacher._current_professor_id]
     assert teacher.get_course_catalog()[0]["teaching"] is True
     teacher.logout()
     assert teacher.login("professor", "p@x.com", _PW)["needs_details"] is False
@@ -611,3 +614,24 @@ def test_old_databases_get_course_codes(db_session_factory: Factory, db_engine: 
     init_db(db_engine)
     legacy = academics.list_courses(db_session_factory)[0]
     assert legacy["code"] == f"CRS-{legacy['id']:03d}" and legacy["level"] == "BACHELORS"
+
+
+def test_older_databases_keep_their_single_professor_as_a_class_membership(
+    db_session_factory: Factory, db_engine: Engine
+) -> None:
+    from sqlalchemy import text
+
+    from eaal_platform.db.engine import init_db
+
+    prof = create_professor_account(
+        db_session_factory, display_name="P", email="p@x.com", password=_PW
+    )
+    student = create_student_account(
+        db_session_factory, display_name="S", email="s@x.com", password=_PW
+    )
+    with db_engine.begin() as connection:  # how an older database stored it
+        connection.execute(text("UPDATE students SET professor_id = :p"), {"p": prof})
+    assert _owner(db_session_factory, student) == []
+    init_db(db_engine)
+    init_db(db_engine)  # and it is safe to upgrade twice
+    assert _owner(db_session_factory, student) == [prof]

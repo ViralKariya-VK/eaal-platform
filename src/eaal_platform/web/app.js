@@ -1414,7 +1414,7 @@ function showProfile() {
               : ""
           }
           ${profile.roll_number ? `<div><dt>Roll No.</dt><dd>${escapeHtml(profile.roll_number)}</dd></div>` : profile.enrollment_no ? `<div><dt>Enrolment No.</dt><dd>${escapeHtml(profile.enrollment_no)}</dd></div>` : ""}
-          ${profile.role === "student" ? `<div><dt>Teacher</dt><dd id="teacherLine">…</dd></div>` : ""}
+          ${profile.role === "student" ? `<div><dt>Teachers</dt><dd id="teacherLine">…</dd></div>` : ""}
         </dl>
         <button class="danger" id="logoutButton">Log Out</button>
       </div>
@@ -2018,7 +2018,7 @@ function showStudents() {
     </div>
     ${rows || `<div class="card"><p class="muted">Nobody in your class yet. Choose your courses above, or add a group or students below.</p></div>`}
     <div class="page-heading" style="margin-top:28px;"><div><h2>Add a whole group</h2>
-      <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it who isn't in another class joins yours. Students of that group who sign up later join automatically.</p></div></div>
+      <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it joins your class. Students of that group who sign up later join automatically.</p></div></div>
     <div class="card" id="groupCard">
       ${
         myCourses.length
@@ -2045,14 +2045,14 @@ function showStudents() {
       }
     </div>
     <div class="page-heading" style="margin-top:28px;"><div><h2>Add individual students</h2>
-      <p class="subtitle">Students who have an account but aren't in anyone's class yet${
-        myCourses.length ? ", in the courses you teach" : ""
-      }. A student can be in one class at a time.</p></div></div>
+      <p class="subtitle">Students who aren't in your class yet${
+        myCourses.length ? ", from the courses you teach" : ""
+      }. A student can be in several professors' classes, one for each subject.</p></div></div>
     <div class="card">
       ${
         unassigned.length
           ? `<div class="check-list">${addable}</div><button class="primary" id="addToClass" style="margin-top:12px;">Add selected to my class</button>`
-          : `<p class="muted">Every student with an account is already in a class. New students appear here after they sign up.</p>`
+          : `<p class="muted">Everyone is already in your class. New students appear here after they sign up.</p>`
       }
     </div>`,
       "students"
@@ -2076,8 +2076,7 @@ function showStudents() {
             }
             preview.textContent =
               `${result.matching} student${result.matching === 1 ? "" : "s"} in this group: ` +
-              `${result.to_add} would be added, ${result.already_yours} already in your class, ` +
-              `${result.in_other_class} in another professor's class.`;
+              `${result.to_add} would be added, ${result.already_yours} already in your class.`;
             addGroupButton.disabled = false;
           });
       };
@@ -2089,8 +2088,7 @@ function showStudents() {
             if (!result.ok) showToast(result.error || "Couldn't add the group.");
             else
               showToast(
-                `${result.added} student${result.added === 1 ? "" : "s"} added` +
-                  (result.in_other_class ? `; ${result.in_other_class} already belong to another class.` : ".")
+                `${result.added} student${result.added === 1 ? "" : "s"} added to your class.`
               );
             showStudents();
           });

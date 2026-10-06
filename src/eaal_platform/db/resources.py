@@ -26,6 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.db import academics
 from eaal_platform.db.models import (
+    ClassMember,
     Professor,
     Resource,
     ResourceFile,
@@ -90,15 +91,30 @@ def _check_url(url: str) -> str:
 # -- classes ------------------------------------------------------------------------------------
 
 
-def _student_row(student: Student, professor_name: str | None = None) -> dict[str, Any]:
+def professors_of(db: OrmSession, student_id: int) -> list[Professor]:
+    """Every professor whose class this student is in."""
+    return (
+        db.query(Professor)
+        .join(ClassMember, ClassMember.professor_id == Professor.id)
+        .filter(ClassMember.student_id == student_id)
+        .order_by(Professor.display_name)
+        .all()
+    )
+
+
+def is_member(db: OrmSession, student_id: int, professor_id: int) -> bool:
+    return db.get(ClassMember, (student_id, professor_id)) is not None
+
+
+def _student_row(student: Student, professors: list[Professor] | None = None) -> dict[str, Any]:
+    teachers = professors if professors is not None else []
     return {
         "id": student.id,
         "name": student.display_name,
         "email": student.email,
         "enrollment_no": student.enrollment_no,
         "must_change_password": student.must_change_password,
-        "professor_id": student.professor_id,
-        "professor_name": professor_name,
+        "professors": [{"id": p.id, "name": p.display_name} for p in teachers],
         **academics.describe(student),
         "course_id": student.course_id,
     }
@@ -110,43 +126,41 @@ def class_students(
     with session_factory() as db:
         rows = (
             db.query(Student)
-            .filter(Student.professor_id == professor_id, Student.email.is_not(None))
+            .join(ClassMember, ClassMember.student_id == Student.id)
+            .filter(ClassMember.professor_id == professor_id, Student.email.is_not(None))
             .order_by(Student.display_name)
             .all()
         )
-        return [_student_row(s) for s in rows]
+        return [_student_row(s, professors_of(db, s.id)) for s in rows]
 
 
-def unassigned_students(session_factory: sessionmaker[OrmSession]) -> list[dict[str, Any]]:
-    """Students nobody has claimed yet (the only ones a professor may add)."""
+def addable_students(
+    session_factory: sessionmaker[OrmSession], professor_id: int
+) -> list[dict[str, Any]]:
+    """Students who aren't in this professor's class yet (others' classes don't matter)."""
     with session_factory() as db:
+        mine = select(ClassMember.student_id).where(ClassMember.professor_id == professor_id)
         rows = (
             db.query(Student)
-            .filter(Student.professor_id.is_(None), Student.email.is_not(None))
+            .filter(Student.email.is_not(None), Student.id.not_in(mine))
             .order_by(Student.display_name)
             .all()
         )
-        return [_student_row(s) for s in rows]
+        return [_student_row(s, professors_of(db, s.id)) for s in rows]
 
 
 def add_to_class(
     session_factory: sessionmaker[OrmSession], professor_id: int, student_ids: list[int]
 ) -> int:
-    """Put unassigned students into this professor's class; returns how many were added."""
+    """Put students into this professor's class; returns how many were newly added."""
     added = 0
     with session_factory() as db:
         for student_id in dict.fromkeys(student_ids):
-            student = db.get(Student, student_id)
-            if student is None:
+            if db.get(Student, student_id) is None:
                 raise ResourceError("That student doesn't exist.")
-            if student.professor_id == professor_id:
+            if is_member(db, student_id, professor_id):
                 continue
-            if student.professor_id is not None:
-                raise ResourceError(
-                    f"{student.display_name} is already in another professor's class. "
-                    "Ask an administrator to move them."
-                )
-            student.professor_id = professor_id
+            db.add(ClassMember(student_id=student_id, professor_id=professor_id))
             added += 1
         db.commit()
     return added
@@ -156,28 +170,37 @@ def remove_from_class(
     session_factory: sessionmaker[OrmSession], professor_id: int, student_id: int
 ) -> None:
     with session_factory() as db:
-        student = db.get(Student, student_id)
-        if student is None or student.professor_id != professor_id:
+        link = db.get(ClassMember, (student_id, professor_id))
+        if link is None:
             raise ResourceError("That student isn't in your class.")
-        student.professor_id = None
+        db.delete(link)
         _drop_student_shares(db, professor_id, student_id)
         db.commit()
 
 
-def assign_student(
-    session_factory: sessionmaker[OrmSession], student_id: int, professor_id: int | None
+def set_student_professors(
+    session_factory: sessionmaker[OrmSession], student_id: int, professor_ids: list[int]
 ) -> None:
-    """Admin: put a student in a professor's class (or take them out of any class)."""
+    """Admin: choose exactly which professors' classes a student is in."""
     with session_factory() as db:
-        student = db.get(Student, student_id)
-        if student is None:
+        if db.get(Student, student_id) is None:
             raise ResourceError("No such student.")
-        if professor_id is not None and db.get(Professor, professor_id) is None:
+        wanted = {int(i) for i in professor_ids}
+        known = (
+            {p for (p,) in db.query(Professor.id).filter(Professor.id.in_(wanted))}
+            if wanted
+            else set()
+        )
+        if known != wanted:
             raise ResourceError("No such professor.")
-        previous = student.professor_id
-        student.professor_id = professor_id
-        if previous is not None and previous != professor_id:
-            _drop_student_shares(db, previous, student_id)
+        current = {
+            link.professor_id for link in db.query(ClassMember).filter_by(student_id=student_id)
+        }
+        for professor_id in wanted - current:
+            db.add(ClassMember(student_id=student_id, professor_id=professor_id))
+        for professor_id in current - wanted:
+            db.delete(db.get(ClassMember, (student_id, professor_id)))
+            _drop_student_shares(db, professor_id, student_id)
         db.commit()
 
 
@@ -286,7 +309,7 @@ def _apply(
             raise ResourceError("Choose at least one student, or share with your whole class.")
         for student_id in chosen:
             student = db.get(Student, student_id)
-            if student is None or student.professor_id != professor_id:
+            if student is None or not is_member(db, student_id, professor_id):
                 raise ResourceError("You can only share with students in your own class.")
             db.add(ResourceStudent(resource_id=resource.id, student_id=student_id))
 
@@ -408,7 +431,7 @@ def professor_resources(
 
 
 def _visible_to_student(db: OrmSession, resource: Resource, student: Student) -> bool:
-    if student.professor_id is None or student.professor_id != resource.professor_id:
+    if not is_member(db, student.id, resource.professor_id):
         return False
     if resource.audience_all:
         return True
@@ -423,9 +446,10 @@ def student_resources(
 ) -> list[dict[str, Any]]:
     with session_factory() as db:
         student = db.get(Student, student_id)
-        if student is None or student.professor_id is None:
+        mine = [p.id for p in professors_of(db, student_id)] if student else []
+        if student is None or not mine:
             return []
-        query = db.query(Resource).filter(Resource.professor_id == student.professor_id)
+        query = db.query(Resource).filter(Resource.professor_id.in_(mine))
         if task_id is not None:
             query = query.join(ResourceLab, ResourceLab.resource_id == Resource.id).filter(
                 ResourceLab.task_id == task_id
@@ -438,12 +462,10 @@ def student_resources(
 
 
 def student_teacher(session_factory: sessionmaker[OrmSession], student_id: int) -> str | None:
+    """The names of the professors whose classes this student is in, e.g. ``"Dr A, Dr B"``."""
     with session_factory() as db:
-        student = db.get(Student, student_id)
-        if student is None or student.professor_id is None:
-            return None
-        professor = db.get(Professor, student.professor_id)
-        return professor.display_name if professor else None
+        names = [p.display_name for p in professors_of(db, student_id)]
+        return ", ".join(names) if names else None
 
 
 def resource_file(

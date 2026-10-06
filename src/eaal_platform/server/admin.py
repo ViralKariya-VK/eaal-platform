@@ -55,6 +55,7 @@ from eaal_platform.db.models import (
     AIInteraction,
     AuditLog,
     Base,
+    ClassMember,
     CodeSnapshot,
     Course,
     Event,
@@ -235,7 +236,7 @@ class UpdateUserRequest(UserRef):
 
 class AssignRequest(BaseModel):
     student_id: int
-    professor_id: int | None = None  # None: take the student out of any class
+    professor_ids: list[int] = []  # every class the student is in (empty: none)
 
 
 class AllowedRequest(BaseModel):
@@ -454,7 +455,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     "sessions": session_counts.get(s.id, 0),
                     "must_change_password": s.must_change_password,
                     "disabled": s.disabled,
-                    "professor_id": s.professor_id,
+                    "professor_ids": sorted(link.professor_id for link in s.class_links),
                     **academics.describe(s),
                     "course_id": s.course_id,
                     "online": ("student", s.id) in online,
@@ -469,7 +470,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     "email": p.email,
                     "must_change_password": p.must_change_password,
                     "disabled": p.disabled,
-                    "students": db.query(Student).filter_by(professor_id=p.id).count(),
+                    "students": db.query(ClassMember).filter_by(professor_id=p.id).count(),
                     "courses": [
                         c.name
                         for c in db.query(Course)
@@ -628,9 +629,9 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     )
             label = f"{request.role}#{request.id} {account.display_name}"
             if isinstance(account, Professor):
-                # Their students become unassigned and their shared material goes with them.
-                for student in db.query(Student).filter_by(professor_id=account.id):
-                    student.professor_id = None
+                # Their class is dissolved (the students keep any other professors) and
+                # their shared material goes with them.
+                db.query(ClassMember).filter_by(professor_id=account.id).delete()
                 resource_store.delete_professor_resources(db, account.id)
                 db.query(ProfessorCourse).filter_by(professor_id=account.id).delete()
                 db.query(ProfessorClass).filter_by(professor_id=account.id).delete()
@@ -936,14 +937,14 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
     def assign_student(
         request: AssignRequest, admin: _AdminSession = Depends(current_admin)
     ) -> dict[str, Any]:
-        """Put a student in a professor's class, move them, or take them out of any class."""
+        """Choose which professors' classes a student is in (they can be in several)."""
         try:
-            resource_store.assign_student(
-                state.session_factory, request.student_id, request.professor_id
+            resource_store.set_student_professors(
+                state.session_factory, request.student_id, request.professor_ids
             )
         except resource_store.ResourceError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        target = f"professor#{request.professor_id}" if request.professor_id else "no class"
+        target = ", ".join(f"professor#{i}" for i in request.professor_ids) or "no class"
         audit(admin, "assign_student", f"student#{request.student_id} -> {target}")
         state.bump(TOPIC_ACCOUNTS, TOPIC_RESOURCES)
         return {"ok": True}

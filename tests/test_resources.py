@@ -78,7 +78,7 @@ def _file(name: str = "notes.pdf", data: bytes = b"%PDF-1.4 hi", **extra: Any) -
 # -- classes ------------------------------------------------------------------------------------
 
 
-def test_professor_adds_unassigned_students_and_sees_only_them(world: World) -> None:
+def test_professor_adds_students_and_sees_only_their_own_class(world: World) -> None:
     assert [s["name"] for s in world.p1.get_unassigned_students()] == ["Stu1", "Stu2", "Stu3"]
     assert world.p1.add_students_to_class([world.ids["stu1"], world.ids["stu2"]]) == {
         "ok": True,
@@ -86,18 +86,27 @@ def test_professor_adds_unassigned_students_and_sees_only_them(world: World) -> 
     }
     assert [s["name"] for s in world.p1.get_students()] == ["Stu1", "Stu2"]
     assert world.p2.get_students() == []
-    assert [s["name"] for s in world.p2.get_unassigned_students()] == ["Stu3"]
+    # Dr Two can still add anyone: being in Dr One's class doesn't keep a student out of theirs.
+    assert [s["name"] for s in world.p2.get_unassigned_students()] == ["Stu1", "Stu2", "Stu3"]
+    assert [s["name"] for s in world.p1.get_unassigned_students()] == ["Stu3"]
     assert world.s1.get_my_teacher() == "Prof One"
     assert world.s3.get_my_teacher() is None
 
 
-def test_a_student_in_another_class_cannot_be_taken(world: World) -> None:
+def test_a_student_can_be_in_several_professors_classes(world: World) -> None:
     world.p1.add_students_to_class([world.ids["stu1"]])
-    result = world.p2.add_students_to_class([world.ids["stu1"]])
-    assert result["ok"] is False
-    assert "another professor's class" in result["error"]
-    assert world.p2.get_students() == []
-    assert world.s1.get_my_teacher() == "Prof One"
+    assert world.p2.add_students_to_class([world.ids["stu1"]]) == {"ok": True, "added": 1}
+    assert world.p2.add_students_to_class([world.ids["stu1"]]) == {"ok": True, "added": 0}
+    assert [s["name"] for s in world.p2.get_students()] == ["Stu1"]
+    assert world.s1.get_my_teacher() == "Prof One, Prof Two"
+
+    # Each professor's material reaches the student; leaving one class ends only that one.
+    world.p1.create_resource(_note("From one"))
+    world.p2.create_resource(_note("From two"))
+    assert {r["title"] for r in world.s1.get_student_resources()} == {"From one", "From two"}
+    world.p1.remove_student_from_class(world.ids["stu1"])
+    assert {r["title"] for r in world.s1.get_student_resources()} == {"From two"}
+    assert world.s1.get_my_teacher() == "Prof Two"
 
 
 def test_a_professor_cannot_remove_or_reset_someone_elses_student(world: World) -> None:
@@ -330,20 +339,23 @@ def test_live_resource_lists_include_owner_and_dates(world: World) -> None:
     assert row["kind"] == "NOTE"
 
 
-def test_admin_assignment_moves_students_and_drops_old_shares(world: World) -> None:
+def test_admin_chooses_which_classes_a_student_is_in(world: World) -> None:
     world.p1.add_students_to_class([world.ids["stu1"]])
     world.p1.create_resource(_note("From one"))
     with world.factory() as db:
+        p1_id = db.query(store.Professor).filter_by(email="p1@x.com").one().id
         p2_id = db.query(store.Professor).filter_by(email="p2@x.com").one().id
-    store.assign_student(world.factory, world.ids["stu1"], p2_id)
+    store.set_student_professors(world.factory, world.ids["stu1"], [p2_id])
     assert world.s1.get_my_teacher() == "Prof Two"
     assert world.s1.get_student_resources() == []  # Prof One's material is no longer theirs
-    store.assign_student(world.factory, world.ids["stu1"], None)
+    store.set_student_professors(world.factory, world.ids["stu1"], [p1_id, p2_id])
+    assert world.s1.get_my_teacher() == "Prof One, Prof Two"
+    store.set_student_professors(world.factory, world.ids["stu1"], [])
     assert world.s1.get_my_teacher() is None
     with pytest.raises(store.ResourceError):
-        store.assign_student(world.factory, world.ids["stu1"], 99999)
+        store.set_student_professors(world.factory, world.ids["stu1"], [99999])
     with pytest.raises(store.ResourceError):
-        store.assign_student(world.factory, 99999, None)
+        store.set_student_professors(world.factory, 99999, [])
 
 
 # -- opening things on the user's own computer ---------------------------------------------------

@@ -132,9 +132,9 @@ class Student(Base):
     disabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
-    # The one professor this student is in the class of (None = not assigned
-    # yet). Only that professor, or an admin, manages the student's class
-    # membership and can share resources with them.
+    # Superseded by ``ClassMember``: a student has a professor for each subject, so
+    # membership is many-to-many. Kept only so older databases still open; its
+    # values are copied into ``class_members`` when such a database is upgraded.
     professor_id: Mapped[int | None] = mapped_column(ForeignKey("professors.id"), nullable=True)
     # Where the student sits in the institution (chosen at sign-up from the
     # lists an administrator maintains; see ``Course``). All optional so
@@ -145,6 +145,9 @@ class Student(Base):
     batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
     roll_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     course: Mapped[Course | None] = relationship(foreign_keys=[course_id])
+    class_links: Mapped[list[ClassMember]] = relationship(
+        cascade="all, delete-orphan", back_populates="student"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -231,6 +234,17 @@ class CourseOption(Base):
     name: Mapped[str] = mapped_column(String(50), nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="options")
+
+
+class ClassMember(Base):
+    """A student is in a professor's class. A student can be in several (one per subject)."""
+
+    __tablename__ = "class_members"
+
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), primary_key=True)
+    professor_id: Mapped[int] = mapped_column(ForeignKey("professors.id"), primary_key=True)
+
+    student: Mapped[Student] = relationship(back_populates="class_links")
 
 
 class ProfessorCourse(Base):

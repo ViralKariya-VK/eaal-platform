@@ -16,7 +16,7 @@ from eaal_platform.client.api import ClientApi
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
 from eaal_platform.db import approvals
 from eaal_platform.db.bootstrap import seed_demo_content
-from eaal_platform.db.models import ExecutionResult, Professor, Student
+from eaal_platform.db.models import ClassMember, ExecutionResult, Professor, Student
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.app import ServerState, callable_methods, create_app
 
@@ -98,7 +98,12 @@ def test_student_and_professor_share_one_database(
     # On a server a lab without a course goes to its professor's class.
     with state.session_factory() as db:
         ada = db.query(Student).filter_by(email="ada@example.com").one()
-        ada.professor_id = db.query(Professor).filter_by(email="k@example.com").one().id
+        db.add(
+            ClassMember(
+                student_id=ada.id,
+                professor_id=db.query(Professor).filter_by(email="k@example.com").one().id,
+            )
+        )
         db.commit()
 
     before = {lab["title"] for lab in student.call("get_labs")}
