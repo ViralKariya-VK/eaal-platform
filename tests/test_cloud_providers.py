@@ -320,7 +320,54 @@ def test_a_model_must_be_chosen_and_diagnose_checks_it() -> None:
 
 
 def test_provider_catalogue() -> None:
-    assert cp.STUDENT_PROVIDER_KEYS == ("gemini", "anthropic", "openai", "xai")
+    assert cp.STUDENT_PROVIDER_KEYS == ("gemini", "anthropic", "openai", "xai", "groq")
     assert all(k in cp.PROVIDERS for k in cp.STUDENT_PROVIDER_KEYS)
     assert cp.PROVIDERS["ollama"].needs_key is False
     assert all(info.help_url.startswith("https://") for info in cp.PROVIDERS.values())
+
+
+def test_groq_keys_work_and_only_chat_models_are_offered() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.groq.com"
+        if request.headers["authorization"] != "Bearer gsk_good":
+            return httpx.Response(401, json={"error": {"message": "Invalid API Key"}})
+        if request.url.path.endswith("/models"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "llama-3.3-70b-versatile"},
+                        {"id": "openai/gpt-oss-20b"},
+                        {"id": "whisper-large-v3-turbo"},
+                        {"id": "canopylabs/orpheus-v1-english"},
+                        {"id": "meta-llama/llama-prompt-guard-2-22m"},
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hello"}}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    check = cp.check_key("groq", "gsk_good", client)
+    assert check.ok and check.models == ["openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
+    assert check.default == "openai/gpt-oss-20b"
+    provider = cp.make_cloud_provider("groq", "gsk_good", check.default, client)
+    reply = provider.generate("hi", GenerationContext(), Purpose.CHAT)
+    assert reply.available and reply.text == "hello"
+    assert "rejected" in cp.check_key("groq", "gsk_bad", client).error  # type: ignore[operator]
+
+
+def test_a_key_pasted_under_the_wrong_company_says_whose_key_it_is() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "Incorrect API key provided"}})
+
+    client = httpx.Client(transport=httpx.MockTransport(refuse))
+    wrong = cp.check_key("xai", "gsk_abc", client)
+    assert not wrong.ok
+    assert "looks like a Groq key" in (wrong.error or "")
+    assert "Choose Groq" in (wrong.error or "")
+    # An ordinary rejection (the right company) keeps the plain message.
+    assert "looks like" not in (cp.check_key("groq", "gsk_abc", client).error or "")
+    keys = ("sk-ant-1", "gsk_1", "xai-1", "AIza1", "sk-1", "zzz")
+    assert [cp.guess_provider(k) for k in keys] == [
+        "anthropic", "groq", "xai", "gemini", "openai", None,
+    ]  # fmt: skip

@@ -1,6 +1,6 @@
 """Hosted AI providers a person can connect with their own API key.
 
-OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) and xAI (Grok). Each
+OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini), xAI (Grok) and Groq. Each
 class knows how to list the models a key may use (which doubles as the key
 check), and how to answer one prompt. They follow the same rules as the
 other providers: same ``build_prompt`` context, low temperature for rubric
@@ -56,7 +56,7 @@ PROVIDERS: dict[str, ProviderInfo] = {
     ),
 }
 # What a student chooses between for their own use.
-STUDENT_PROVIDER_KEYS = ("gemini", "anthropic", "openai", "xai")
+STUDENT_PROVIDER_KEYS = ("gemini", "anthropic", "openai", "xai", "groq")
 
 
 class ProviderError(Exception):
@@ -275,6 +275,26 @@ class XAIProvider(_OpenAICompatible):
         return sorted(i for i in ids if i.startswith("grok") and "image" not in i)
 
 
+_GROQ_EXCLUDE = ("whisper", "orpheus", "guard", "safeguard", "tts", "embed", "allam")  # fmt: skip
+
+
+class GroqCloudProvider(_OpenAICompatible):
+    """Groq (console.groq.com, keys start ``gsk_``): not the same company as xAI's Grok."""
+
+    info = PROVIDERS["groq"]
+    base_url = "https://api.groq.com/openai/v1"
+    default_preferences = [  # noqa: RUF012
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+        "llama",
+    ]
+
+    def _parse_models(self, data: Any) -> list[str]:
+        ids = [str(item["id"]) for item in data["data"]]
+        return sorted(i for i in ids if not any(word in i for word in _GROQ_EXCLUDE))
+
+
 class AnthropicProvider(CloudProvider):
     info = PROVIDERS["anthropic"]
     base_url = "https://api.anthropic.com/v1"
@@ -395,7 +415,26 @@ _CLASSES: dict[str, type[CloudProvider]] = {
     "anthropic": AnthropicProvider,
     "gemini": GeminiProvider,
     "xai": XAIProvider,
+    "groq": GroqCloudProvider,
 }
+
+# How each company's keys start, to say "that's a Groq key" when one is pasted in the wrong place.
+_KEY_PREFIXES = (
+    ("sk-ant-", "anthropic"),
+    ("gsk_", "groq"),
+    ("xai-", "xai"),
+    ("AIza", "gemini"),
+    ("sk-", "openai"),
+)
+
+
+def guess_provider(api_key: str) -> str | None:
+    """Which company a key looks like it belongs to, going by how it starts."""
+    text = api_key.strip()
+    for prefix, key in _KEY_PREFIXES:
+        if text.startswith(prefix):
+            return key
+    return None
 
 
 def make_cloud_provider(
@@ -428,6 +467,15 @@ def check_key(key: str, api_key: str, client: httpx.Client | None = None) -> Key
         provider = make_cloud_provider(key, api_key, None, client)
         models = provider.list_models()
     except ProviderError as exc:
+        guessed = guess_provider(api_key)
+        if guessed and guessed != key and "rejected the API key" in str(exc):
+            return KeyCheck(
+                False,
+                error=(
+                    f"This looks like a {PROVIDERS[guessed].label} key, not a "
+                    f"{PROVIDERS[key].label} one. Choose {PROVIDERS[guessed].label} in the list."
+                ),
+            )
         return KeyCheck(False, error=str(exc))
     default = provider.default_model(models)
     ordered = ([default] if default else []) + [m for m in models if m != default]
@@ -441,5 +489,6 @@ __all__ = [
     "KeyCheck",
     "ProviderError",
     "check_key",
+    "guess_provider",
     "make_cloud_provider",
 ]

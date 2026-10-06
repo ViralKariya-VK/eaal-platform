@@ -1561,13 +1561,13 @@ async function renderAiConnect(container, onConnected) {
 
   const $ = (id) => container.querySelector(`#${id}`);
   const current = () => providers.find((p) => p.key === $("aiProvider").value);
-  const hasModelList = (p) => p.key !== "groq" && p.key !== "ollama";
+  const hasModelList = (p) => p.key !== "ollama";
   const reset = () => {
     $("aiModelBlock").style.display = "none";
     $("aiModel").innerHTML = "";
     $("aiErr").textContent = "";
     const p = current();
-    $("aiConnect").disabled = !(p.key === "ollama" || (p.key === "groq" && $("aiKey").value.trim()));
+    $("aiConnect").disabled = p.key !== "ollama";
   };
   const showProvider = () => {
     const p = current();

@@ -44,7 +44,6 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.ai import cloud_providers
-from eaal_platform.ai.groq_provider import GroqProvider
 from eaal_platform.ai.ollama_provider import OllamaProvider
 from eaal_platform.ai.provider import (
     AIProvider,
@@ -1656,17 +1655,7 @@ class CavyApi:
         candidate: AIProvider
         if provider == "ollama":
             candidate = OllamaProvider()
-        elif provider == "groq":
-            key = api_key.strip()
-            if not key:
-                return {"ok": False, "error": "Enter a Groq API key."}
-            candidate = GroqProvider(api_key=key)
-            if not candidate.ping():
-                return {
-                    "ok": False,
-                    "error": "Couldn't reach Groq with that key. Check it and try again.",
-                }
-        elif provider in cloud_providers.PROVIDERS and provider not in ("groq", "ollama"):
+        elif provider in cloud_providers.PROVIDERS and provider != "ollama":
             check = cloud_providers.check_key(provider, api_key, self._ai_http)
             if not check.ok:
                 return {"ok": False, "error": check.error}

@@ -212,14 +212,20 @@ def _student_session(app: ClientApi) -> int:
     return int(app.start_practice()["session_id"])
 
 
-def test_students_see_the_four_choices_and_teachers_see_all(room: Classroom) -> None:
+def test_students_see_the_five_choices_and_teachers_see_all(room: Classroom) -> None:
     student, teacher = room.computer(), room.computer()
     student.login("student", "a@x.com", _PW)
     teacher.login("professor", "p@x.com", _PW)
 
     offered = student.get_ai_providers()
     assert offered["personal"] is True
-    assert [p["key"] for p in offered["providers"]] == ["gemini", "anthropic", "openai", "xai"]
+    assert [p["key"] for p in offered["providers"]] == [
+        "gemini",
+        "anthropic",
+        "openai",
+        "xai",
+        "groq",
+    ]
     assert all(p["needs_key"] for p in offered["providers"])
     everything = teacher.get_ai_providers()
     assert everything["personal"] is False

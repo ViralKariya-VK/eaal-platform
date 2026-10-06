@@ -1358,10 +1358,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         request: AiCheckRequest, _: _AdminSession = Depends(current_admin)
     ) -> dict[str, Any]:
         """Check a key and list the models it can use (the key is not stored)."""
-        if request.provider not in cloud_providers.PROVIDERS or request.provider in (
-            "groq",
-            "ollama",
-        ):
+        if request.provider not in cloud_providers.PROVIDERS or request.provider == "ollama":
             raise HTTPException(status_code=400, detail="Unknown AI provider.")
         return cloud_providers.check_key(request.provider, request.api_key, state.ai_http).as_dict()
 

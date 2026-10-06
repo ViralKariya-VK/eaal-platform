@@ -160,7 +160,7 @@ class ClientApi:
 
         The check goes from this computer straight to the provider.
         """
-        if provider not in cloud_providers.PROVIDERS or provider in ("groq", "ollama"):
+        if provider not in cloud_providers.PROVIDERS or provider == "ollama":
             return {"ok": False, "models": [], "default": None, "error": "Unknown AI provider."}
         return cloud_providers.check_key(provider, api_key, self._ai_http).as_dict()
 

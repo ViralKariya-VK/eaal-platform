@@ -1,7 +1,8 @@
-"""Tests for switching the AI assistant between local Ollama and hosted Groq."""
+"""Tests for switching the AI assistant between local Ollama and hosted Groq (a cloud provider)."""
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
@@ -38,24 +39,36 @@ class _FakeBackend(AIProvider):
         return f"{self.name}-model"
 
 
-class _FakeGroq(_FakeBackend):
-    name = "groq"
-
-    def ping(self) -> bool:
-        return self.api_key == _VALID_KEY
-
-
 class _FakeOllama(_FakeBackend):
     name = "ollama"
     reachable = False
 
 
+def _groq_http() -> httpx.Client:
+    """Stands in for Groq: lists models for the valid key, refuses any other."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("authorization") != f"Bearer {_VALID_KEY}":
+            return httpx.Response(401, json={"error": {"message": "Invalid API Key"}})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "openai/gpt-oss-120b"},
+                    {"id": "llama-3.3-70b-versatile"},
+                    {"id": "whisper-large-v3"},  # speech, not chat
+                ]
+            },
+        )
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
 @pytest.fixture
 def api(db_session_factory: sessionmaker[OrmSession], monkeypatch: pytest.MonkeyPatch) -> CavyApi:
-    monkeypatch.setattr(bridge_module, "GroqProvider", _FakeGroq)
     monkeypatch.setattr(bridge_module, "OllamaProvider", _FakeOllama)
     logger = EventLogger(db_session_factory)
-    return CavyApi(db_session_factory, logger, ai_provider=_FakeOllama())
+    return CavyApi(db_session_factory, logger, ai_provider=_FakeOllama(), ai_http=_groq_http())
 
 
 def test_get_ai_settings_reports_current_provider(api: CavyApi) -> None:
@@ -73,7 +86,7 @@ def test_switch_to_groq_with_valid_key(api: CavyApi) -> None:
     assert result == {
         "ok": True,
         "provider": "groq",
-        "model": "groq-model",
+        "model": "openai/gpt-oss-120b",
         "available": True,
         "problem": None,
     }
@@ -88,15 +101,10 @@ def test_rejected_groq_key_keeps_previous_provider(api: CavyApi) -> None:
     assert api.get_ai_settings()["provider"] == "ollama"
 
 
-def test_blank_groq_key_is_rejected_without_contacting_groq(
-    api: CavyApi, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def _must_not_construct(*args: object, **kwargs: object) -> None:
-        raise AssertionError("GroqProvider should not be built for a blank key")
+def test_blank_groq_key_is_rejected_without_contacting_groq(api: CavyApi) -> None:
+    result = api.set_ai_provider("groq", "   ")
 
-    monkeypatch.setattr(bridge_module, "GroqProvider", _must_not_construct)
-
-    assert api.set_ai_provider("groq", "   ") == {"ok": False, "error": "Enter a Groq API key."}
+    assert result["ok"] is False and "key" in result["error"].lower()
 
 
 def test_switch_back_to_ollama_even_if_not_running(api: CavyApi) -> None:

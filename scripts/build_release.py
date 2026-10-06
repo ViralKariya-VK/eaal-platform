@@ -108,7 +108,7 @@ def smoke_test(executable: Path) -> None:
     """Prove the *packaged* app is the current code and can do what the app promises.
 
     It re-launches itself to run a script (that is how student code runs), and
-    that script imports the newest parts: Excel reading, the four AI providers,
+    that script imports the newest parts: Excel reading, the five AI providers,
     the approved-email rules and the server. If any is missing from the bundle
     the build fails here instead of shipping a stale installer.
     """
@@ -123,7 +123,7 @@ def smoke_test(executable: Path) -> None:
     expected = (
         '"sum": 10',
         '"excel_rows": 1',
-        '"student_choices": ["gemini", "anthropic", "openai", "xai"]',
+        '"student_choices": ["gemini", "anthropic", "openai", "xai", "groq"]',
         '"lab_lock": true',
         '"levels": ["BACHELORS", "ENGINEERING", "MASTERS"]',
     )
@@ -133,7 +133,7 @@ def smoke_test(executable: Path) -> None:
             f"stdout: {done.stdout}\nstderr: {done.stderr}"
         )
     print("Smoke test passed: the packaged app runs student code and has Excel import,")
-    print("the four AI providers, approved-email rules, courses, lab mode and the server.")
+    print("the five AI providers, approved-email rules, courses, lab mode and the server.")
 
 
 def make_dmg_background(destination: Path) -> None:
