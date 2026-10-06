@@ -208,6 +208,11 @@ class Course(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     years: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # A short unique ID shown beside the name (e.g. CRS-007), so two courses with
+    # similar names can never be confused when assigning people.
+    code: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="BACHELORS")
+    department: Mapped[str] = mapped_column(String(100), nullable=False, default="Other")
 
     options: Mapped[list[CourseOption]] = relationship(
         back_populates="course", cascade="all, delete-orphan", order_by="CourseOption.name"

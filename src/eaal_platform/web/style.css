@@ -2172,3 +2172,60 @@ textarea {
   border-radius: 10px;
   padding: 10px 12px;
 }
+
+/* -- Courses a professor teaches ------------------------------------------------ */
+.teaching-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.teaching-card h3 {
+  margin: 0 0 4px;
+}
+.teaching-card .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chip {
+  background: var(--teal-bg, #d9f0ea);
+  color: var(--teal-text, #0f766e);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12.5px;
+}
+.course-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+.course-pick {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid var(--line, #e4dccb);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.course-pick:hover {
+  background: var(--cream-100, #f3ecdc);
+}
+.course-pick input {
+  margin-top: 4px;
+}
+.course-pick-name {
+  font-weight: 600;
+}
+.code-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  background: var(--cream-100, #f3ecdc);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: var(--text-muted, #7a7367);
+  margin-left: 4px;
+}

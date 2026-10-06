@@ -49,6 +49,7 @@ def test_create_account_then_login_as_professor(
         "role": "professor",
         "name": "Dr. Kariya",
         "must_change_password": False,
+        "needs_details": False,
     }
     logger.stop()
 

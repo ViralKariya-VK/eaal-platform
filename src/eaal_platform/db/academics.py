@@ -31,8 +31,24 @@ from eaal_platform.db.models import (
 MAX_YEARS = 6
 YEAR_NAMES = ("First", "Second", "Third", "Fourth", "Fifth", "Sixth")
 KINDS = ("division", "batch")
-# Offered as one-click starting points in the admin panel.
-SUGGESTED_COURSES = (("Degree", 3), ("Masters", 2), ("Engineering", 4))
+# The kind of programme, and how many years each usually runs.
+LEVELS: dict[str, tuple[str, int]] = {
+    "BACHELORS": ("Bachelor's", 3),
+    "MASTERS": ("Master's", 2),
+    "ENGINEERING": ("Engineering", 4),
+}
+DEPARTMENTS = (
+    "Management",
+    "Commerce",
+    "Science",
+    "Computer Application",
+    "Information Technology",
+    "Computer Science",
+    "Data Science",
+    "Arts & Humanities",
+    "Law",
+    "Other",
+)
 
 
 class AcademicError(ValueError):
@@ -50,10 +66,20 @@ def _clean(value: Any) -> str | None:
     return text or None
 
 
+def course_label(course: Course) -> str:
+    """Name with its ID code, the way courses are shown everywhere: ``Data Science (CRS-004)``."""
+    return f"{course.name} ({course.code})" if course.code else course.name
+
+
 def _course_dict(course: Course) -> dict[str, Any]:
     return {
         "id": course.id,
         "name": course.name,
+        "code": course.code,
+        "label": course_label(course),
+        "level": course.level,
+        "level_label": LEVELS.get(course.level, (course.level, 0))[0],
+        "department": course.department,
         "years": course.years,
         "year_options": [{"value": y, "label": year_label(y)} for y in range(1, course.years + 1)],
         "divisions": [{"id": o.id, "name": o.name} for o in course.options if o.kind == "division"],
@@ -118,22 +144,50 @@ def _name_taken(db: OrmSession, name: str, except_id: int | None = None) -> bool
     return query.first() is not None
 
 
-def add_course(session_factory: sessionmaker[OrmSession], name: str, years: Any) -> int:
+def _check_level(level: Any) -> str:
+    if level not in LEVELS:
+        raise AcademicError("Choose Bachelor's, Master's or Engineering.")
+    return str(level)
+
+
+def _check_department(department: Any) -> str:
+    clean = _clean(department)
+    if clean is None:
+        raise AcademicError("Choose the department.")
+    return clean[:100]
+
+
+def add_course(
+    session_factory: sessionmaker[OrmSession],
+    name: str,
+    years: Any,
+    level: Any = "BACHELORS",
+    department: Any = "Other",
+) -> int:
     clean = _clean(name)
     if clean is None:
         raise AcademicError("Enter a course name.")
     number = _check_years(years)
+    kind = _check_level(level)
+    dept = _check_department(department)
     with session_factory() as db:
         if _name_taken(db, clean):
             raise AcademicError(f"There is already a course called {clean}.")
-        course = Course(name=clean, years=number)
+        course = Course(name=clean, years=number, level=kind, department=dept)
         db.add(course)
+        db.flush()
+        course.code = f"CRS-{course.id:03d}"
         db.commit()
         return course.id
 
 
 def update_course(
-    session_factory: sessionmaker[OrmSession], course_id: int, name: str, years: Any
+    session_factory: sessionmaker[OrmSession],
+    course_id: int,
+    name: str,
+    years: Any,
+    level: Any = None,
+    department: Any = None,
 ) -> None:
     clean = _clean(name)
     if clean is None:
@@ -153,8 +207,12 @@ def update_course(
                 f"{too_far} student(s) are in a year beyond {number}. Move them first."
             )
         course.name, course.years = clean, number
+        if level is not None:
+            course.level = _check_level(level)
+        if department is not None:
+            course.department = _check_department(department)
         for task in db.query(Task).filter(Task.course_id == course_id):
-            task.course = clean
+            task.course = course_label(course)
         db.commit()
 
 
@@ -241,8 +299,19 @@ def professor_course_ids(session_factory: sessionmaker[OrmSession], professor_id
 
 
 def set_professor_courses(
-    session_factory: sessionmaker[OrmSession], professor_id: int, course_ids: list[int]
-) -> None:
+    session_factory: sessionmaker[OrmSession],
+    professor_id: int,
+    course_ids: list[int],
+    *,
+    adopt: bool = True,
+) -> dict[str, int]:
+    """Say which courses a professor teaches.
+
+    Teaching a course means taking its students into the professor's class: every
+    student of a newly added course who has no class yet joins at once, and so does
+    anyone who signs up for it later. (``adopt=False`` records the courses only.)
+    Returns how many students were added.
+    """
     with session_factory() as db:
         if db.get(Professor, professor_id) is None:
             raise AcademicError("No such professor.")
@@ -252,6 +321,9 @@ def set_professor_courses(
         )
         if known != wanted:
             raise AcademicError("One of those courses doesn't exist.")
+        before = {
+            c for (c,) in db.query(ProfessorCourse.course_id).filter_by(professor_id=professor_id)
+        }
         db.query(ProfessorCourse).filter_by(professor_id=professor_id).delete()
         for course_id in wanted:
             db.add(ProfessorCourse(professor_id=professor_id, course_id=course_id))
@@ -260,6 +332,52 @@ def set_professor_courses(
             if group.course_id not in wanted:
                 db.delete(group)
         db.commit()
+    added = 0
+    if adopt:
+        for course_id in sorted(wanted - before):
+            added += add_group(
+                session_factory, professor_id, {"course_id": course_id}, every_course=True
+            )["added"]
+    return {"added_students": added}
+
+
+def catalog_for_professor(
+    session_factory: sessionmaker[OrmSession], professor_id: int
+) -> list[dict[str, Any]]:
+    """Every course, marked with whether this professor teaches it (for the picker)."""
+    mine = professor_course_ids(session_factory, professor_id)
+    counts = {c["id"]: c for c in list_courses_with_staff(session_factory)}
+    return [
+        {**course, "teaching": course["id"] in mine, "students": counts[course["id"]]["students"]}
+        for course in list_courses(session_factory)
+    ]
+
+
+def course_roster(
+    session_factory: sessionmaker[OrmSession], course_id: int
+) -> list[dict[str, Any]]:
+    """The students of one course and whose class each is in (for the admin panel)."""
+    with session_factory() as db:
+        names = {p.id: p.display_name for p in db.query(Professor)}
+        rows = (
+            db.query(Student)
+            .filter(Student.course_id == course_id, Student.email.is_not(None))
+            .order_by(Student.year, Student.division, Student.batch, Student.display_name)
+            .all()
+        )
+        return [
+            {
+                "id": s.id,
+                "name": s.display_name,
+                "email": s.email,
+                "year_label": year_label(s.year),
+                "division": s.division,
+                "batch": s.batch,
+                "roll_number": s.roll_number,
+                "teacher": names.get(s.professor_id) if s.professor_id else None,
+            }
+            for s in rows
+        ]
 
 
 def courses_for_professor(
@@ -316,7 +434,7 @@ def _resolve(db: OrmSession, raw: dict[str, Any] | None, *, student: bool) -> di
         raise AcademicError("Enter your roll number.")
     return {
         "course_id": course.id,
-        "course_name": course.name,
+        "course_name": course_label(course),
         "year": year,
         "division": values["division"],
         "batch": values["batch"],
@@ -345,6 +463,7 @@ def describe(student: Student) -> dict[str, Any]:
     """A student's place, ready to show."""
     return {
         "course": student.course.name if student.course else None,
+        "course_label": course_label(student.course) if student.course else None,
         "year": student.year,
         "year_label": year_label(student.year),
         "division": student.division,
@@ -388,7 +507,7 @@ def _matching(
 
 
 def _group_label(course: Course, year: int | None, division: str | None, batch: str | None) -> str:
-    parts = [course.name, year_label(year) if year else "all years"]
+    parts = [course_label(course), year_label(year) if year else "all years"]
     parts.append(f"Div {division}" if division else "all divisions")
     parts.append(f"Batch {batch}" if batch else "all batches")
     return " · ".join(parts)

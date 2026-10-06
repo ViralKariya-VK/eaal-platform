@@ -323,6 +323,7 @@ class CavyApi:
                 "role": "professor",
                 "name": self._current_professor_name,
                 "must_change_password": self._professor_must_change_password(),
+                "needs_details": self._professor_needs_courses(),
             }
         raise ValueError(f"Unknown role {role!r}")
 
@@ -383,6 +384,14 @@ class CavyApi:
             else:
                 account = db_session.get(Professor, user_id)
             return bool(account and account.disabled)
+
+    def _professor_needs_courses(self) -> bool:
+        """True for a professor on a server who hasn't yet said which courses they teach."""
+        if not self._restrict_signup:
+            return False
+        professor_id = self._require_professor_id()
+        has_any = bool(academics.professor_course_ids(self._session_factory, professor_id))
+        return not has_any and bool(academics.list_courses(self._session_factory))
 
     def _student_needs_details(self) -> bool:
         """True for a student who hasn't said which course they are in (while courses exist)."""
@@ -520,6 +529,21 @@ class CavyApi:
             self._require_professor_id(),
             every_course=not self._restrict_signup,
         )
+
+    def get_course_catalog(self) -> list[dict[str, Any]]:
+        """Every course, marked with the ones this professor teaches (for the picker)."""
+        return academics.catalog_for_professor(self._session_factory, self._require_professor_id())
+
+    def set_my_courses(self, course_ids: list[int]) -> dict[str, Any]:
+        """The professor says which courses they teach; those courses' students join their class."""
+        professor_id = self._require_professor_id()
+        try:
+            result = academics.set_professor_courses(
+                self._session_factory, professor_id, [int(i) for i in course_ids]
+            )
+        except academics.AcademicError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, **result}
 
     def get_class_groups(self) -> list[dict[str, Any]]:
         return academics.professor_groups(self._session_factory, self._require_professor_id())

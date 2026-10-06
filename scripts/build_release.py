@@ -93,7 +93,7 @@ print(json.dumps({
     "providers": sorted(cloud_providers.PROVIDERS),
     "student_choices": list(cloud_providers.STUDENT_PROVIDER_KEYS),
     "lab_lock": lockdown.should_block(0x5B, 0, False, False),
-    "courses": [name for name, _ in academics.SUGGESTED_COURSES],
+    "levels": sorted(academics.LEVELS),
 }))
 """
 
@@ -125,7 +125,7 @@ def smoke_test(executable: Path) -> None:
         '"excel_rows": 1',
         '"student_choices": ["gemini", "anthropic", "openai", "xai"]',
         '"lab_lock": true',
-        '"courses": ["Degree", "Masters", "Engineering"]',
+        '"levels": ["BACHELORS", "ENGINEERING", "MASTERS"]',
     )
     if done.returncode != 0 or not all(part in done.stdout for part in expected):
         raise SystemExit(

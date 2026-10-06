@@ -49,16 +49,44 @@ def _course(factory: Factory, name: str = "Engineering", years: int = 4) -> int:
 # -- the lists -----------------------------------------------------------------------------
 
 
+_KINDS = (
+    ("Degree", 3, "BACHELORS", "Science"),
+    ("Masters", 2, "MASTERS", "Management"),
+    ("Engineering", 4, "ENGINEERING", "Information Technology"),
+)
+
+
 def test_courses_have_a_set_number_of_years(db_session_factory: Factory) -> None:
     ids = {
-        name: academics.add_course(db_session_factory, name, years)
-        for name, years in academics.SUGGESTED_COURSES
+        name: academics.add_course(db_session_factory, name, years, level, dept)
+        for name, years, level, dept in _KINDS
     }
     listed = {c["name"]: c for c in academics.list_courses(db_session_factory)}
     assert [y["label"] for y in listed["Masters"]["year_options"]] == ["First Year", "Second Year"]
     assert len(listed["Degree"]["year_options"]) == 3
     assert len(listed["Engineering"]["year_options"]) == 4
     assert listed["Engineering"]["id"] == ids["Engineering"]
+    # Every course has its own ID code, shown with the name.
+    codes = {c["code"] for c in listed.values()}
+    assert len(codes) == 3 and all(code.startswith("CRS-") for code in codes)
+    assert listed["Masters"]["label"] == f"Masters ({listed['Masters']['code']})"
+    assert (listed["Masters"]["level_label"], listed["Masters"]["department"]) == (
+        "Master's",
+        "Management",
+    )
+
+
+def test_a_course_needs_a_level_and_a_department(db_session_factory: Factory) -> None:
+    with pytest.raises(AcademicError, match="Bachelor"):
+        academics.add_course(db_session_factory, "X", 3, "DOCTORATE", "Science")
+    with pytest.raises(AcademicError, match="department"):
+        academics.add_course(db_session_factory, "X", 3, "BACHELORS", " ")
+    course = academics.add_course(
+        db_session_factory, "Data Science", 3, "BACHELORS", "Data Science"
+    )
+    academics.update_course(db_session_factory, course, "Data Science", 2, "MASTERS", "Science")
+    listed = academics.list_courses(db_session_factory)[0]
+    assert (listed["years"], listed["level"], listed["department"]) == (2, "MASTERS", "Science")
 
 
 def test_course_rules(db_session_factory: Factory) -> None:
@@ -162,7 +190,7 @@ def school(db_session_factory: Factory) -> dict[str, Any]:
     prof_b = create_professor_account(
         db_session_factory, display_name="Dr B", email="b@x.com", password=_PW
     )
-    academics.set_professor_courses(db_session_factory, prof_a, [course_id])
+    academics.set_professor_courses(db_session_factory, prof_a, [course_id], adopt=False)
     students = {}
     for name, year, batch in (("s1", 1, "A1"), ("s2", 1, "A2"), ("s3", 2, "A1")):
         students[name] = create_student_account(
@@ -202,7 +230,8 @@ def test_a_professor_takes_a_group_into_their_class(
         None
     ]
     labels = [g["label"] for g in academics.professor_groups(db_session_factory, school["a"])]
-    assert labels == ["Engineering · First Year · all divisions · all batches"]
+    code = academics.list_courses(db_session_factory)[0]["code"]
+    assert labels == [f"Engineering ({code}) · First Year · all divisions · all batches"]
 
 
 def test_only_assigned_courses_and_only_unclaimed_students(
@@ -405,8 +434,12 @@ def test_the_admin_manages_courses_and_teaching(
     http, _, auth = server
     post = lambda path, body=None: http.post(f"/admin/api{path}", json=body or {}, headers=auth)  # noqa: E731
 
-    assert post("/courses/add-suggested").json()["result"] == 3
-    assert post("/courses/add-suggested").json()["result"] == 0  # nothing left to add
+    for name, years, level, dept in _KINDS:
+        added = post(
+            "/courses/add", {"name": name, "years": years, "level": level, "department": dept}
+        )
+        assert added.status_code == 200
+    assert post("/courses/add", {"name": "X", "years": 3, "level": "NOPE"}).status_code == 400
     body = http.get("/admin/api/courses", headers=auth).json()
     years = {c["name"]: c["years"] for c in body["courses"]}
     assert years == {"Degree": 3, "Masters": 2, "Engineering": 4}
@@ -484,3 +517,97 @@ def test_sign_up_options_are_public(
     _course(db_session_factory)
     listed = http.get("/api/academic").json()  # no token needed
     assert listed[0]["name"] == "Engineering" and len(listed[0]["year_options"]) == 4
+
+
+# -- teaching a course takes its students --------------------------------------------------
+
+
+def test_teaching_a_course_brings_in_its_students_now_and_later(
+    db_session_factory: Factory,
+) -> None:
+    course = _course(db_session_factory)
+    early = [
+        create_student_account(
+            db_session_factory,
+            display_name=f"e{i}",
+            email=f"e{i}@x.com",
+            password=_PW,
+            cohort=academics.signup_cohort(db_session_factory, _place(course, i)),
+        )
+        for i in (1, 2, 3)
+    ]
+    prof = create_professor_account(
+        db_session_factory, display_name="Dr A", email="a@x.com", password=_PW
+    )
+    other = create_professor_account(
+        db_session_factory, display_name="Dr B", email="b@x.com", password=_PW
+    )
+    assert [_owner(db_session_factory, s) for s in early] == [None, None, None]
+
+    result = academics.set_professor_courses(db_session_factory, prof, [course])
+    assert result == {"added_students": 3}
+    assert [_owner(db_session_factory, s) for s in early] == [prof] * 3
+
+    later = create_student_account(
+        db_session_factory,
+        display_name="late",
+        email="late@x.com",
+        password=_PW,
+        cohort=academics.signup_cohort(db_session_factory, _place(course, 2)),
+    )
+    assert _owner(db_session_factory, later) == prof
+
+    # Re-saving the same course adds nobody twice; a second professor takes nobody's students.
+    assert academics.set_professor_courses(db_session_factory, prof, [course]) == {
+        "added_students": 0
+    }
+    assert academics.set_professor_courses(db_session_factory, other, [course]) == {
+        "added_students": 0
+    }
+    assert _owner(db_session_factory, early[0]) == prof
+
+
+def test_a_professor_picks_their_own_courses(db_session_factory: Factory) -> None:
+    seed_demo_content(db_session_factory)
+    course = _course(db_session_factory)
+    create_professor_account(db_session_factory, display_name="P", email="p@x.com", password=_PW)
+    student = create_student_account(
+        db_session_factory,
+        display_name="S",
+        email="s@x.com",
+        password=_PW,
+        cohort=academics.signup_cohort(db_session_factory, _place(course)),
+    )
+    teacher = _server_api(db_session_factory)
+    login = teacher.login("professor", "p@x.com", _PW)
+    assert login["needs_details"] is True  # asked to choose on the first login
+
+    catalog = teacher.get_course_catalog()
+    assert [(c["id"], c["teaching"], c["students"]) for c in catalog] == [(course, False, 1)]
+    assert catalog[0]["label"].startswith("Engineering (CRS-")
+
+    done = teacher.set_my_courses([course])
+    assert done == {"ok": True, "added_students": 1}
+    assert _owner(db_session_factory, student) == teacher._current_professor_id
+    assert teacher.get_course_catalog()[0]["teaching"] is True
+    teacher.logout()
+    assert teacher.login("professor", "p@x.com", _PW)["needs_details"] is False
+    assert teacher.set_my_courses([999])["ok"] is False
+
+
+def test_old_databases_get_course_codes(db_session_factory: Factory, db_engine: Engine) -> None:
+    from sqlalchemy import text
+
+    from eaal_platform.db.engine import init_db
+
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO courses (name, years, level, department) "
+                "VALUES ('Legacy', 3, 'BACHELORS', 'Other')"
+            )
+        )
+        connection.execute(text("UPDATE courses SET code = NULL"))
+    init_db(db_engine)
+    legacy = academics.list_courses(db_session_factory)[0]
+    assert legacy["code"] == f"CRS-{legacy['id']:03d}" and legacy["level"] == "BACHELORS"

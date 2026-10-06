@@ -96,6 +96,9 @@ _ADDED_COLUMNS = (
     ("tasks", "professor_id", "INTEGER REFERENCES professors(id)"),
     ("sessions", "focus_losses", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "submit_reason", "VARCHAR(50)"),
+    ("courses", "code", "VARCHAR(20)"),
+    ("courses", "level", "VARCHAR(20) NOT NULL DEFAULT 'BACHELORS'"),
+    ("courses", "department", "VARCHAR(100) NOT NULL DEFAULT 'Other'"),
 )
 
 
@@ -108,10 +111,24 @@ def _add_missing_columns(engine: Engine) -> None:
                 connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
 
 
+def _give_courses_codes(engine: Engine) -> None:
+    """Older databases have courses without an ID code: number them, then keep codes unique."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE courses SET code = 'CRS-' || substr('000' || id, -3, 3) WHERE code IS NULL"
+            )
+        )
+        connection.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_courses_code ON courses (code)")
+        )
+
+
 def init_db(engine: Engine) -> None:
     """Create all tables that don't already exist, and upgrade older files."""
     Base.metadata.create_all(engine)
     _add_missing_columns(engine)
+    _give_courses_codes(engine)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

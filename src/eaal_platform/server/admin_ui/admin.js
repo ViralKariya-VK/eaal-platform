@@ -597,7 +597,7 @@ function showUsers(quiet) {
 
 function placeText(u) {
   if (!u.course) return `<span class="muted">${esc(u.roll_number ? "Roll " + u.roll_number : "No course set")}</span>`;
-  return esc([u.course, u.year_label, u.division && "Div " + u.division, u.batch && "Batch " + u.batch, u.roll_number && "Roll " + u.roll_number].filter(Boolean).join(" · "));
+  return esc([u.course_label || u.course, u.year_label, u.division && "Div " + u.division, u.batch && "Batch " + u.batch, u.roll_number && "Roll " + u.roll_number].filter(Boolean).join(" · "));
 }
 
 // The course / year / division / batch / roll number fields, filled from the course list.
@@ -605,7 +605,7 @@ function placeFields(courses, current = {}) {
   const options = (items, selected, blank) =>
     `<option value="">${esc(blank)}</option>` + items.map((i) => `<option value="${esc(i.value)}" ${String(i.value) === String(selected ?? "") ? "selected" : ""}>${esc(i.label)}</option>`).join("");
   return `
-    <label>Course <select id="pCourse">${options(courses.map((c) => ({ value: c.id, label: c.name })), current.course_id, "No course")}</select></label>
+    <label>Course <select id="pCourse">${options(courses.map((c) => ({ value: c.id, label: c.label })), current.course_id, "No course")}</select></label>
     <div class="cols2">
       <label>Year <select id="pYear"></select></label>
       <label>Roll number <input id="pRoll" value="${esc(current.roll_number || "")}" /></label>
@@ -756,126 +756,179 @@ function showEmail() {
 }
 
 // -- courses & classes ----------------------------------------------------------
+//
+// The journey: the admin adds a course -> professors choose (or are given) the courses
+// they teach -> students pick a course when they sign up -> each student automatically
+// joins the class of the professor who teaches their course.
 
-function showCourses(quiet) {
+function showCourses() {
   return guarded(async () => {
     const data = await get("/courses");
-    const chip = (text, attrs) => `<span class="chip">${esc(text)} <button class="chip-x" ${attrs} data-option-name="${esc(text)}" title="Remove">&times;</button></span>`;
-    const card = (c) => {
-      const free = data.professors.filter((p) => !c.professors.some((t) => t.id === p.id));
-      return `
-        <div class="card course-card" data-course="${c.id}">
-          <div class="page-head" style="margin:0 0 8px">
-            <div><h3 style="margin:0">${esc(c.name)}</h3>
-              <p class="muted">${c.years} year${c.years === 1 ? "" : "s"} (${esc(c.year_options.map((y) => y.label).join(", "))}) · ${c.students} student${c.students === 1 ? "" : "s"}</p></div>
-            <div class="row-actions"><button data-edit-course="${c.id}">Edit</button><button class="danger" data-delete-course="${c.id}" data-name="${esc(c.name)}">Delete</button></div>
-          </div>
-          <div class="cols2">
-            <div><h4>Divisions</h4>
-              <div class="chips">${c.divisions.map((d) => chip(d.name, `data-remove-option="${d.id}"`)).join("") || '<span class="muted">None yet. Students will not be asked for a division.</span>'}</div>
-              <div class="inline-add"><input data-new-division="${c.id}" placeholder="e.g. A" /><button data-add-option="${c.id}:division">Add</button></div></div>
-            <div><h4>Batches</h4>
-              <div class="chips">${c.batches.map((b) => chip(b.name, `data-remove-option="${b.id}"`)).join("") || '<span class="muted">None yet. Students will not be asked for a batch.</span>'}</div>
-              <div class="inline-add"><input data-new-batch="${c.id}" placeholder="e.g. A1" /><button data-add-option="${c.id}:batch">Add</button></div></div>
-          </div>
-          <h4 style="margin-top:14px">Professors who teach it</h4>
-          <div class="chips">${c.professors.map((p) => chip(p.name, `data-unteach="${c.id}:${p.id}"`)).join("") || '<span class="muted">Nobody yet. A professor can only add students and aim labs at courses assigned here.</span>'}</div>
-          <div class="inline-add"><select data-teach-select="${c.id}"><option value="">Assign a professor…</option>${free.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select><button data-teach="${c.id}">Assign</button></div>
-        </div>`;
-    };
+    const step = (n, title, text) => `<div class="step"><span class="step-n">${n}</span><div><b>${title}</b><div class="muted">${text}</div></div></div>`;
+    const rows = data.courses.map((c) => [
+      `<span class="code-badge">${esc(c.code)}</span>`,
+      `<b>${esc(c.name)}</b>`,
+      esc(c.level_label),
+      esc(c.department),
+      c.years,
+      c.students,
+      c.professors.length ? c.professors.map((p) => esc(p.name)).join(", ") : '<span class="muted">nobody yet</span>',
+      `<div class="row-actions"><button class="primary" data-manage="${c.id}">Manage</button><button data-edit-course="${c.id}">Edit</button><button class="danger" data-delete-course="${c.id}" data-name="${esc(c.label)}">Delete</button></div>`,
+    ]);
     main().innerHTML = `
       <div class="page-head"><div><h1>Courses &amp; classes</h1>
-        <p class="muted">The lists students choose from when they sign up: a course has a number of years (a degree 3, a master's 2, engineering 4), plus the divisions and batches you allow. Assign professors to courses here; a professor can then take whole groups (course, year, division, batch) into their class and aim labs at them.</p></div></div>
-      <div class="card"><h3>Add a course</h3>
-        <div class="inline-add"><input id="newCourseName" placeholder="Course name, e.g. B.Sc. Data Science" /><input id="newCourseYears" type="number" min="1" max="6" value="3" style="max-width:90px" title="Years" />
-        <button class="primary" id="addCourse">Add course</button>
-        <button id="addSuggested">Add Degree (3), Masters (2), Engineering (4)</button></div></div>
-      ${data.courses.length ? data.courses.map(card).join("") : '<div class="card"><p class="muted">No courses yet. Until you add one, students are not asked for a course when they sign up.</p></div>'}`;
+        <p class="muted">Every course has its own ID. Students choose their course when they sign up, professors choose the courses they teach, and the two are matched automatically.</p></div>
+        <button class="primary" id="addCourse">Add course</button></div>
+      <div class="pipeline">
+        ${step(1, "Add the course", "Name, level, department and years. It gets an ID.")}
+        ${step(2, "Add divisions &amp; batches", "Optional. Students are only asked for what you add.")}
+        ${step(3, "Professors pick it", "Or assign them here. Their class fills with the course's students.")}
+        ${step(4, "Students pick it", "At sign-up. They join the teaching professor's class by themselves.")}
+      </div>
+      <div class="card">${table(["ID", "Course", "Level", "Department", "Years", "Students", "Professors", ""], rows, { empty: "No courses yet. Add the first one." })}</div>`;
 
-    const run = async (work, message) => {
-      try {
-        await work();
-        if (message) toast(message);
-      } catch (err) {
-        toast(err.message);
-      }
-      showCourses(true);
-    };
-    document.getElementById("addCourse").addEventListener("click", () =>
-      run(() => post("/courses/add", { name: document.getElementById("newCourseName").value, years: Number(document.getElementById("newCourseYears").value) }), "Course added.")
-    );
-    document.getElementById("addSuggested").addEventListener("click", () => run(async () => {
-      const r = await post("/courses/add-suggested");
-      toast(r.result ? `${r.result} course${r.result === 1 ? "" : "s"} added.` : "Those are already there.");
-    }));
-    main().querySelectorAll("[data-add-option]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const [id, kind] = b.dataset.addOption.split(":");
-        const input = main().querySelector(`[data-new-${kind}="${id}"]`);
-        run(() => post("/courses/options/add", { course_id: Number(id), kind, name: input.value }));
-      })
-    );
-    main().querySelectorAll("[data-remove-option]").forEach((b) =>
-      b.addEventListener("click", () =>
-        confirmBox(`Remove ${b.dataset.optionName}?`, "It disappears from the sign-up and lab pickers. One that students or labs still use can't be removed.", "Remove", () =>
-          run(() => post("/courses/options/remove", { id: Number(b.dataset.removeOption) }))
-        )
-      )
-    );
-    const teaching = (courseId) => data.courses.find((c) => c.id === courseId).professors.map((p) => p.id);
-    main().querySelectorAll("[data-teach]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const courseId = Number(b.dataset.teach);
-        const select = main().querySelector(`[data-teach-select="${courseId}"]`);
-        if (!select.value) return toast("Choose a professor first.");
-        const professorId = Number(select.value);
-        const have = data.courses.filter((c) => c.professors.some((p) => p.id === professorId)).map((c) => c.id);
-        run(() => post("/courses/professors", { professor_id: professorId, course_ids: [...have, courseId] }), "Professor assigned.");
-      })
-    );
-    main().querySelectorAll("[data-unteach]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const [courseId, professorId] = b.dataset.unteach.split(":").map(Number);
-        const have = data.courses.filter((c) => c.professors.some((p) => p.id === professorId)).map((c) => c.id);
-        run(() => post("/courses/professors", { professor_id: professorId, course_ids: have.filter((id) => id !== courseId) }), "Removed.");
-      })
-    );
+    document.getElementById("addCourse").addEventListener("click", () => courseForm(null, data));
+    main().querySelectorAll("[data-manage]").forEach((b) => b.addEventListener("click", () => manageCourse(Number(b.dataset.manage))));
     main().querySelectorAll("[data-edit-course]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const c = data.courses.find((x) => x.id === Number(b.dataset.editCourse));
-        modal(
-          `<h3>Edit ${esc(c.name)}</h3>
-           <label>Name <input id="cName" value="${esc(c.name)}" /></label>
-           <label>Years <input id="cYears" type="number" min="1" max="6" value="${c.years}" /></label>
-           <p class="error" id="cError"></p>
-           <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="save">Save</button></div>`,
-          (o) => {
-            o.querySelector("#cancel").addEventListener("click", () => o.remove());
-            o.querySelector("#save").addEventListener("click", async () => {
-              try {
-                await post("/courses/update", { id: c.id, name: o.querySelector("#cName").value, years: Number(o.querySelector("#cYears").value) });
-                o.remove();
-                toast("Saved.");
-                showCourses(true);
-              } catch (err) {
-                o.querySelector("#cError").textContent = err.message;
-              }
-            });
-          }
-        );
-      })
+      b.addEventListener("click", () => courseForm(data.courses.find((x) => x.id === Number(b.dataset.editCourse)), data))
     );
     main().querySelectorAll("[data-delete-course]").forEach((b) =>
       b.addEventListener("click", () =>
         confirmBox(`Delete ${b.dataset.name}?`, "Its divisions, batches and professor assignments go with it. A course that students or labs still use can't be deleted.", "Delete course", async () => {
           await post("/courses/delete", { id: Number(b.dataset.deleteCourse) });
           toast("Course deleted.");
-          showCourses(true);
+          showCourses();
         })
       )
     );
-    // (No auto-refresh here: it would redraw over a half-typed name.)
+    // (No auto-refresh here: it would redraw over a half-typed form.)
   });
+}
+
+function courseForm(existing, data) {
+  const editing = !!existing;
+  const levelOptions = data.levels.map((l) => `<option value="${l.value}" data-years="${l.years}" ${existing && existing.level === l.value ? "selected" : ""}>${esc(l.label)}</option>`).join("");
+  const deptOptions = data.departments.map((d) => `<option ${existing && existing.department === d ? "selected" : ""}>${esc(d)}</option>`).join("");
+  modal(
+    `<h3>${editing ? "Edit " + esc(existing.label) : "Add a course"}</h3>
+     <label>Course name <input id="cName" value="${esc(existing?.name || "")}" placeholder="e.g. B.Sc. Data Science" /></label>
+     <div class="cols2">
+       <label>Level <select id="cLevel">${levelOptions}</select></label>
+       <label>Department <select id="cDept">${deptOptions}</select></label>
+     </div>
+     <label>How many years does it run? <input id="cYears" type="number" min="1" max="6" value="${existing ? existing.years : data.levels[0].years}" /></label>
+     <p class="muted" id="cHint">${editing ? "" : "A Bachelor's usually runs 3 years, a Master's 2 and Engineering 4; change it if yours differs."}</p>
+     <p class="error" id="cError"></p>
+     <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="save">${editing ? "Save" : "Create course"}</button></div>`,
+    (o) => {
+      let touched = editing;
+      o.querySelector("#cYears").addEventListener("input", () => (touched = true));
+      o.querySelector("#cLevel").addEventListener("change", (e) => {
+        if (!touched) o.querySelector("#cYears").value = e.target.selectedOptions[0].dataset.years;
+      });
+      o.querySelector("#cancel").addEventListener("click", () => o.remove());
+      o.querySelector("#save").addEventListener("click", async () => {
+        const body = { name: o.querySelector("#cName").value, years: Number(o.querySelector("#cYears").value), level: o.querySelector("#cLevel").value, department: o.querySelector("#cDept").value };
+        try {
+          if (editing) await post("/courses/update", { id: existing.id, ...body });
+          else await post("/courses/add", body);
+          o.remove();
+          toast(editing ? "Saved." : "Course created.");
+          showCourses();
+        } catch (err) {
+          o.querySelector("#cError").textContent = err.message;
+        }
+      });
+    }
+  );
+}
+
+// One course in full: its divisions and batches, the professors who teach it, and its students.
+async function manageCourse(courseId) {
+  let data, roster;
+  try {
+    [data, roster] = await Promise.all([get("/courses"), get(`/courses/${courseId}/students`)]);
+  } catch (err) {
+    toast(err.message);
+    return;
+  }
+  const c = data.courses.find((x) => x.id === courseId);
+  if (!c) return;
+  const free = data.professors.filter((p) => !c.professors.some((t) => t.id === p.id));
+  const chip = (text, attrs) => `<span class="chip">${esc(text)} <button class="chip-x" ${attrs} data-option-name="${esc(text)}" title="Remove">&times;</button></span>`;
+  const studentRows = roster.map((r) => [
+    esc(r.name),
+    esc(r.email),
+    esc([r.year_label, r.division && "Div " + r.division, r.batch && "Batch " + r.batch].filter(Boolean).join(" · ")),
+    esc(r.roll_number || ""),
+    r.teacher ? esc(r.teacher) : '<span class="muted">no class yet</span>',
+  ]);
+  const overlay = modal(
+    `<div class="page-head" style="margin-bottom:10px"><div>
+        <h3 style="margin:0"><span class="code-badge">${esc(c.code)}</span> ${esc(c.name)}</h3>
+        <p class="muted">${esc(c.level_label)} &middot; ${esc(c.department)} &middot; ${c.years} year${c.years === 1 ? "" : "s"} (${esc(c.year_options.map((y) => y.label).join(", "))})</p></div>
+        <button id="closeManage">Close</button></div>
+     <div class="cols2">
+       <div class="manage-box"><h4>Divisions</h4>
+         <div class="chips">${c.divisions.map((d) => chip(d.name, `data-remove-option="${d.id}"`)).join("") || '<span class="muted">None. Students aren\'t asked for a division.</span>'}</div>
+         <div class="inline-add"><input id="newDivision" placeholder="e.g. A" /><button id="addDivision">Add</button></div></div>
+       <div class="manage-box"><h4>Batches</h4>
+         <div class="chips">${c.batches.map((b) => chip(b.name, `data-remove-option="${b.id}"`)).join("") || '<span class="muted">None. Students aren\'t asked for a batch.</span>'}</div>
+         <div class="inline-add"><input id="newBatch" placeholder="e.g. A1" /><button id="addBatch">Add</button></div></div>
+     </div>
+     <div class="manage-box"><h4>Professors who teach it</h4>
+       <p class="muted" style="margin:0 0 6px">Professors can also choose their own courses when they log in. Anyone added here gets this course's students in their class at once.</p>
+       <div class="chips">${c.professors.map((p) => chip(p.name, `data-unteach="${p.id}"`)).join("") || '<span class="muted">Nobody yet.</span>'}</div>
+       <div class="inline-add"><select id="teachSelect"><option value="">Assign a professor…</option>${free.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select><button id="assignTeacher">Assign</button></div></div>
+     <div class="manage-box"><h4>Students (${roster.length})</h4>
+       ${table(["Name", "Email", "Year · division · batch", "Roll", "Teacher"], studentRows, { empty: "Nobody has picked this course yet." })}</div>
+     <p class="error" id="manageError"></p>`,
+    (o) => {
+      o.querySelector(".modal").classList.add("wide");
+      const reopen = () => {
+        o.remove();
+        manageCourse(courseId);
+        showCourses();
+      };
+      const run = async (work, message) => {
+        try {
+          await work();
+          if (message) toast(message);
+        } catch (err) {
+          toast(err.message);
+        }
+        reopen();
+      };
+      o.querySelector("#closeManage").addEventListener("click", () => o.remove());
+      o.querySelector("#addDivision").addEventListener("click", () => run(() => post("/courses/options/add", { course_id: courseId, kind: "division", name: o.querySelector("#newDivision").value })));
+      o.querySelector("#addBatch").addEventListener("click", () => run(() => post("/courses/options/add", { course_id: courseId, kind: "batch", name: o.querySelector("#newBatch").value })));
+      o.querySelectorAll("[data-remove-option]").forEach((b) =>
+        b.addEventListener("click", () =>
+          confirmBox(`Remove ${b.dataset.optionName}?`, "It disappears from the sign-up and lab pickers. One that students or labs still use can't be removed.", "Remove", () =>
+            run(() => post("/courses/options/remove", { id: Number(b.dataset.removeOption) }))
+          )
+        )
+      );
+      const teachingOf = (professorId) => data.courses.filter((x) => x.professors.some((p) => p.id === professorId)).map((x) => x.id);
+      o.querySelector("#assignTeacher").addEventListener("click", () => {
+        const id = Number(o.querySelector("#teachSelect").value);
+        if (!id) return toast("Choose a professor first.");
+        run(async () => {
+          const r = await post("/courses/professors", { professor_id: id, course_ids: [...teachingOf(id), courseId] });
+          if (r.result && r.result.added_students) toast(`${r.result.added_students} student${r.result.added_students === 1 ? "" : "s"} joined their class.`);
+        });
+      });
+      o.querySelectorAll("[data-unteach]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const id = Number(b.dataset.unteach);
+          confirmBox(`Remove ${b.dataset.optionName} from this course?`, "They stop receiving new students from it. Students already in their class stay there.", "Remove", () =>
+            run(() => post("/courses/professors", { professor_id: id, course_ids: teachingOf(id).filter((x) => x !== courseId) }))
+          );
+        })
+      );
+    }
+  );
+  return overlay;
 }
 
 // -- labs ---------------------------------------------------------------------

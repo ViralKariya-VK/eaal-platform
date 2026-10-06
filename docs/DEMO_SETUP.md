@@ -114,13 +114,23 @@ computers talk to each other.
      *Registered*. You can edit or remove waiting entries; edit registered
      people on the **Users** page, where you can also add, edit, disable or
      delete any account directly.
-6. **Set up courses** (new). In **Courses & classes**, click **Add Degree (3),
-   Masters (2), Engineering (4)** or add your own course with its number of
-   years. For each course add the **divisions** and **batches** students may
-   pick (a course with none simply isn't asked). Then **assign professors** to
-   the courses they teach. Students choose their course, year, division, batch
-   and roll number from these lists when they sign up; a professor can only add
-   students and aim labs at courses assigned to them.
+6. **Set up courses.** The journey, end to end:
+   1. **Admin** opens **Courses & classes → Add course**: name, level (Bachelor's,
+      Master's or Engineering), department, and how many years it runs. The course
+      gets an ID such as `CRS-004`, shown with its name everywhere.
+   2. **Manage** the course to add its divisions and batches (optional: students are
+      only asked for what exists).
+   3. **Professors** choose the courses they teach when they first log in (or later
+      under My Class → Choose courses); the admin can also assign them in Manage.
+   4. **Students** pick their course, year, division, batch and roll number at sign-up
+      (or on their first login when they get their login by email).
+   5. **Matching is automatic:** every student of a course joins the class of the
+      professor who teaches it: those who already signed up when the professor
+      picks the course, and anyone who signs up afterwards. A student already in
+      another professor's class is never taken. A professor can narrow things with
+      My Class → Add a whole group (year, division, batch).
+   6. **Labs** are aimed at one of the professor's courses (and optionally a year,
+      division or batch); only those students see them.
 7. **Email for first logins** (optional but recommended). Make a Gmail account for
    CAVY, turn on 2-Step Verification, create an **App password**, then in the
    admin panel open **Email**, enter the address and app password, **Save**, and

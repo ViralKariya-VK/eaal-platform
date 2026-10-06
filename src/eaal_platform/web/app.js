@@ -639,7 +639,7 @@ function showCreateAccount() {
         const host = document.getElementById("cohortFields");
         if (!host) return;
         host.innerHTML = signupCourses.length
-          ? `<label>Course <select id="signupCourse">${cohortSelectOptions(signupCourses.map((c) => ({ value: c.id, label: c.name })), "Choose your course")}</select></label>
+          ? `<label>Course <select id="signupCourse">${cohortSelectOptions(signupCourses.map((c) => ({ value: c.id, label: c.label })), "Choose your course")}</select></label>
              <div class="field-pair">
                <label>Year <select id="signupYear"></select></label>
                <label>Roll Number <input type="text" id="signupRoll" placeholder="e.g. 27" /></label>
@@ -773,7 +773,7 @@ function showFirstLogin(needsDetails) {
         <label>Repeat new password <input type="password" id="firstRepeat" autocomplete="new-password" /></label>
         ${
           courses.length
-            ? `<label>Course <select id="firstCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.name })), "Choose your course")}</select></label>
+            ? `<label>Course <select id="firstCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.label })), "Choose your course")}</select></label>
                <div class="field-pair">
                  <label>Year <select id="firstYear"></select></label>
                  <label>Roll Number <input type="text" id="firstRoll" placeholder="e.g. 27" /></label>
@@ -1407,7 +1407,7 @@ function showProfile() {
           <div><dt>Email</dt><dd>${escapeHtml(profile.email || "—")}</dd></div>
           ${
             profile.course
-              ? `<div><dt>Course</dt><dd>${escapeHtml(profile.course)}</dd></div>
+              ? `<div><dt>Course</dt><dd>${escapeHtml(profile.course_label || profile.course)}</dd></div>
                  ${profile.year_label ? `<div><dt>Year</dt><dd>${escapeHtml(profile.year_label)}</dd></div>` : ""}
                  ${profile.division ? `<div><dt>Division</dt><dd>${escapeHtml(profile.division)}</dd></div>` : ""}
                  ${profile.batch ? `<div><dt>Batch</dt><dd>${escapeHtml(profile.batch)}</dd></div>` : ""}`
@@ -1932,7 +1932,7 @@ function classTreeHtml(students, studentRow) {
     return [...groups.entries()];
   };
   const noCourse = "No course set";
-  const courses = byKey(students, (s) => s.course || noCourse).sort(([a], [b]) =>
+  const courses = byKey(students, (s) => s.course_label || s.course || noCourse).sort(([a], [b]) =>
     a === noCourse ? 1 : b === noCourse ? -1 : a.localeCompare(b)
   );
   const average = (list) => {
@@ -1965,7 +1965,7 @@ function classTreeHtml(students, studentRow) {
 
 function placeLine(item) {
   if (!item.course) return "—";
-  return [item.course, item.year_label, item.division && `Div ${item.division}`, item.batch && `Batch ${item.batch}`]
+  return [item.course_label || item.course, item.year_label, item.division && `Div ${item.division}`, item.batch && `Batch ${item.batch}`]
     .filter(Boolean)
     .join(" · ");
 }
@@ -1976,7 +1976,8 @@ function showStudents() {
     api().get_unassigned_students(),
     api().get_my_courses(),
     api().get_class_groups(),
-  ]).then(([students, unassigned, myCourses, groups]) => {
+    api().get_course_catalog(),
+  ]).then(([students, unassigned, myCourses, groups, catalog]) => {
     nextRefresh = null;
     const studentRow = (student) => `
       <tr>
@@ -2004,14 +2005,25 @@ function showStudents() {
     setScreen(
       `
     <div class="page-heading"><div><h1>My class</h1><p class="subtitle">The students in your class. Only you (and an administrator) can manage them or share resources with them.</p></div></div>
-    ${rows || `<div class="card"><p class="muted">Nobody in your class yet. Add a group or students below.</p></div>`}
+    <div class="card teaching-card">
+      <div>
+        <h3>Courses you teach</h3>
+        <p class="muted">The students of these courses join your class automatically, now and whenever someone new picks the course.</p>
+        <div class="chips">${
+          catalog.filter((c) => c.teaching).map((c) => `<span class="chip">${escapeHtml(c.label)}</span>`).join("") ||
+          `<span class="muted">None yet. Choose the courses you teach to get your students.</span>`
+        }</div>
+      </div>
+      <button class="primary" id="chooseCourses">Choose courses</button>
+    </div>
+    ${rows || `<div class="card"><p class="muted">Nobody in your class yet. Choose your courses above, or add a group or students below.</p></div>`}
     <div class="page-heading" style="margin-top:28px;"><div><h2>Add a whole group</h2>
       <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it who isn't in another class joins yours. Students of that group who sign up later join automatically.</p></div></div>
     <div class="card" id="groupCard">
       ${
         myCourses.length
           ? `<div class="group-form">
-               <label>Course <select id="groupCourse">${cohortSelectOptions(myCourses.map((c) => ({ value: c.id, label: c.name })), "Choose a course")}</select></label>
+               <label>Course <select id="groupCourse">${cohortSelectOptions(myCourses.map((c) => ({ value: c.id, label: c.label })), "Choose a course")}</select></label>
                <label>Year <select id="groupYear"></select></label>
                <label>Division <select id="groupDivision"></select></label>
                <label>Batch <select id="groupBatch"></select></label>
@@ -2111,6 +2123,7 @@ function showStudents() {
           });
       });
     }
+    document.getElementById("chooseCourses").addEventListener("click", () => showTeachingCourses(false));
     document.querySelectorAll(".view-progress").forEach((btn) => {
       btn.addEventListener("click", () => showStudentProgress(Number(btn.dataset.studentId)));
     });
@@ -2155,6 +2168,62 @@ function showStudents() {
       });
     });
   });
+}
+
+// A professor chooses which courses they teach. Every student of a chosen course joins their
+// class (existing ones now, new ones as they sign up).
+function showTeachingCourses(firstTime) {
+  api()
+    .get_course_catalog()
+    .then((catalog) => {
+      const rows = catalog
+        .map(
+          (c) => `
+        <label class="course-pick">
+          <input type="checkbox" data-course="${c.id}" ${c.teaching ? "checked" : ""} />
+          <div>
+            <div class="course-pick-name">${escapeHtml(c.name)} <span class="code-badge">${escapeHtml(c.code || "")}</span></div>
+            <div class="muted">${escapeHtml(c.level_label || "")} &middot; ${escapeHtml(c.department || "")} &middot; ${c.years} year${c.years === 1 ? "" : "s"} &middot; ${c.students} student${c.students === 1 ? "" : "s"}</div>
+          </div>
+        </label>`
+        )
+        .join("");
+      setScreen(
+        `
+    <div class="page-heading"><div><h1>${firstTime ? "Which courses do you teach?" : "Courses you teach"}</h1>
+      <p class="subtitle">Tick every course you teach. The students of those courses join your class automatically, and you can aim labs at them.</p></div></div>
+    <div class="card">
+      ${rows ? `<div class="course-pick-grid">${rows}</div>` : `<p class="muted">Your administrator hasn't added any courses yet.</p>`}
+      <p class="auth-error" id="teachingError"></p>
+      <div class="button-row" style="margin-top:14px;">
+        <button class="primary" id="saveTeaching">${firstTime ? "Save and continue" : "Save"}</button>
+        ${firstTime ? `<button class="ghost" id="skipTeaching">Skip for now</button>` : `<button class="ghost" id="cancelTeaching">Cancel</button>`}
+      </div>
+    </div>`,
+        firstTime ? "home" : "students"
+      );
+      const done = () => (firstTime ? showMyLabs() : showStudents());
+      document.getElementById("saveTeaching").addEventListener("click", () => {
+        const ids = [...document.querySelectorAll("[data-course]:checked")].map((c) => Number(c.dataset.course));
+        api()
+          .set_my_courses(ids)
+          .then((result) => {
+            if (!result.ok) {
+              document.getElementById("teachingError").textContent = result.error || "Couldn't save.";
+              return;
+            }
+            if (result.added_students) {
+              showToast(`${result.added_students} student${result.added_students === 1 ? "" : "s"} joined your class.`);
+            }
+            done();
+          })
+          .catch((err) => {
+            document.getElementById("teachingError").textContent = errorText(err);
+          });
+      });
+      const other = document.getElementById(firstTime ? "skipTeaching" : "cancelTeaching");
+      other.addEventListener("click", done);
+    });
 }
 
 function showTemporaryPassword(studentName, temporaryPassword, onClose) {
@@ -2255,7 +2324,7 @@ function renderCreateSession(existing, courses) {
         ${
           courses.length
             ? `<label>Course <span class="required">*</span>
-                <select id="sessionCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.name })), "Choose a course")}</select>
+                <select id="sessionCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.label })), "Choose a course")}</select>
               </label>
               <label>Topic
                 <input type="text" id="sessionTopic" placeholder="Enter topic" />
@@ -3804,7 +3873,7 @@ function showStudentProgress(studentId, backLabel = "Back to My Class", back = s
   api()
     .get_student_progress(studentId)
     .then((data) => {
-      const place = [data.student.course, data.student.year_label, data.student.division && `Div ${data.student.division}`, data.student.batch && `Batch ${data.student.batch}`]
+      const place = [data.student.course_label || data.student.course, data.student.year_label, data.student.division && `Div ${data.student.division}`, data.student.batch && `Batch ${data.student.batch}`]
         .filter(Boolean)
         .join(" · ");
       const heading = `<button class="back-link" id="progressBack">${icon("back")}${escapeHtml(backLabel)}</button>
@@ -3832,7 +3901,7 @@ function showStudentProgress(studentId, backLabel = "Back to My Class", back = s
 // A student's submitted code and the output of their last run, stage by stage.
 function showStudentWork(work, back, backLabel = "Back") {
   const stageName = (type) => STAGE_LABELS[type] || "Submission";
-  const place = [work.student.course, work.student.year_label, work.student.division && `Div ${work.student.division}`, work.student.batch && `Batch ${work.student.batch}`]
+  const place = [work.student.course_label || work.student.course, work.student.year_label, work.student.division && `Div ${work.student.division}`, work.student.batch && `Batch ${work.student.batch}`]
     .filter(Boolean)
     .join(" · ");
   setScreen(
@@ -4024,7 +4093,8 @@ function enterApp(role, name, mustChangePassword = false, needsDetails = false) 
   } else if (mustChangePassword) {
     showProfile();
   } else if (role === "professor") {
-    showMyLabs();
+    if (needsDetails) showTeachingCourses(true);
+    else showMyLabs();
     maybePromptAiSetup();
   } else {
     showLabs();

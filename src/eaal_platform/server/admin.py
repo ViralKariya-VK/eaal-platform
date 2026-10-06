@@ -189,6 +189,8 @@ class CohortRequest(BaseModel):
 class CourseRequest(BaseModel):
     name: str
     years: int
+    level: str = "BACHELORS"
+    department: str = "Other"
 
 
 class CourseUpdateRequest(CourseRequest):
@@ -707,7 +709,11 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         return {
             "courses": academics.list_courses_with_staff(state.session_factory),
             "professors": professors,
-            "suggested": [{"name": n, "years": y} for n, y in academics.SUGGESTED_COURSES],
+            "levels": [
+                {"value": key, "label": label, "years": years}
+                for key, (label, years) in academics.LEVELS.items()
+            ],
+            "departments": list(academics.DEPARTMENTS),
         }
 
     @router.post("/courses/add")
@@ -718,21 +724,20 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
             admin,
             "add_course",
             request.name,
-            lambda: academics.add_course(state.session_factory, request.name, request.years),
+            lambda: academics.add_course(
+                state.session_factory,
+                request.name,
+                request.years,
+                request.level,
+                request.department,
+            ),
         )
 
-    @router.post("/courses/add-suggested")
-    def course_add_suggested(admin: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
-        def work() -> int:
-            have = {c["name"].lower() for c in academics.list_courses(state.session_factory)}
-            added = 0
-            for name, years in academics.SUGGESTED_COURSES:
-                if name.lower() not in have:
-                    academics.add_course(state.session_factory, name, years)
-                    added += 1
-            return added
-
-        return course_action(admin, "add_suggested_courses", "", work)
+    @router.get("/courses/{course_id}/students")
+    def course_students(
+        course_id: int, _: _AdminSession = Depends(current_admin)
+    ) -> list[dict[str, Any]]:
+        return academics.course_roster(state.session_factory, course_id)
 
     @router.post("/courses/update")
     def course_update(
@@ -743,7 +748,12 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
             "update_course",
             f"#{request.id} {request.name}",
             lambda: academics.update_course(
-                state.session_factory, request.id, request.name, request.years
+                state.session_factory,
+                request.id,
+                request.name,
+                request.years,
+                request.level,
+                request.department,
             ),
         )
 
