@@ -38,3 +38,6 @@ groq.txt
 build-*.log
 windows_logs/
 src/eaal_platform/_build_info.py
+
+# a private note in the project folder: never commit
+cavy.txt

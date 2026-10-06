@@ -129,6 +129,12 @@ computers talk to each other.
    password, and they choose their own password (and their course, year,
    division, batch and roll number) the first time they log in. Without it,
    students use the normal sign-up form. Needs internet on the server PC.
+   **Forgot password** also uses it: on the login screen (students and teachers) the
+   person enters their email, receives a 6-digit code (valid 15 minutes, 5 tries),
+   and can only set a new password by entering that code.
+   **Lost the admin password?** Double-click `get-admin-password.bat` (Windows) or
+   `get-admin-password.command` (Mac) in the project folder on the server computer:
+   it sets and shows a fresh admin login (it creates `admin@cavy.local` if none exists).
 8. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
    (OpenAI, Claude, Gemini, Grok, Groq or Ollama), paste a key, press **Check key**,
    choose a model, **Connect**. It is used to score sessions and for chat by

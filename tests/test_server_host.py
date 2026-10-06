@@ -115,15 +115,32 @@ def _make_admin(db_path: Path, email: str = "boss@x.com") -> None:
     state.engine.dispose()
 
 
+def test_the_command_creates_the_first_administrator(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from eaal_platform.auth import verify_password
+    from eaal_platform.db.models import Admin
+    from eaal_platform.server.__main__ import reset_admin
+
+    db_path = tmp_path / "server.db"
+    assert reset_admin(db_path, None) == 0
+    shown = capsys.readouterr().out
+    assert "admin@cavy.local" in shown
+    password = next(ln.split(":  ")[1] for ln in shown.splitlines() if "New password" in ln)
+    state = build_state(db_path)
+    with state.session_factory() as db:
+        admin = db.query(Admin).one()
+        assert verify_password(password, admin.password_hash)
+    state.engine.dispose()
+    assert reset_admin(db_path, "someone@else.com") == 1  # naming an unknown admin still fails
+
+
 def test_reset_admin_password_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from eaal_platform.auth import verify_password
     from eaal_platform.db.models import Admin, AuditLog
     from eaal_platform.server.__main__ import reset_admin
 
     db_path = tmp_path / "server.db"
-    assert reset_admin(db_path, None) == 1  # no admin yet
-    assert "no administrator" in capsys.readouterr().out.lower()
-
     _make_admin(db_path)
     assert reset_admin(db_path, None) == 0
     shown = capsys.readouterr().out

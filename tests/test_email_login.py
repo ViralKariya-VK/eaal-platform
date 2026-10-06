@@ -299,3 +299,124 @@ def test_the_database_browser_hides_the_mail_password(
 def test_local_apps_keep_the_old_sign_up(db_session_factory: Factory) -> None:
     api = CavyApi(db_session_factory, EventLogger(db_session_factory))
     assert api.get_signup_info() == {"email_signup": False}
+
+
+# -- forgotten passwords --------------------------------------------------------------------
+
+
+def _code_in(body: str) -> str:
+    return next(line.split()[-1] for line in body.splitlines() if "Your code" in line)
+
+
+def _both_accounts(db_session_factory: Factory) -> None:
+    from eaal_platform.db.bootstrap import create_student_account
+
+    create_student_account(
+        db_session_factory, display_name="Sam", email="sam@uni.edu", password=_PW
+    )
+    create_professor_account(
+        db_session_factory, display_name="Prof", email="prof@uni.edu", password=_PW
+    )
+
+
+@pytest.mark.parametrize(
+    ("role", "email"), [("student", "sam@uni.edu"), ("professor", "prof@uni.edu")]
+)
+def test_only_the_right_code_resets_a_password(
+    server: tuple[TestClient, ServerState, list[tuple[str, str]], dict[str, str]],
+    db_session_factory: Factory,
+    role: str,
+    email: str,
+) -> None:
+    http, _, outbox, _ = server
+    _both_accounts(db_session_factory)
+    backend = RemoteBackend("http://testserver", http=http)
+    assert backend.login(role, email, _PW)["ok"]  # signed in somewhere
+
+    asked = http.post("/api/request_reset", json={"email": email.upper()})
+    assert asked.status_code == 200 and "6-digit code" in asked.json()["result"]["message"]
+    to, body = outbox[-1]
+    assert to == email
+    code = _code_in(body)
+    assert len(code) == 6 and code.isdigit()
+
+    def confirm(c: str, password: str = "brand-new-password") -> Any:
+        return http.post(
+            "/api/confirm_reset", json={"email": email, "code": c, "new_password": password}
+        )
+
+    wrong = "000000" if code != "000000" else "111111"
+    assert confirm(wrong).status_code == 400
+    assert "isn't right" in confirm(wrong).json()["error"]
+    assert confirm(code, "short").status_code == 400  # weak password, code not spent
+    assert confirm(code).status_code == 200
+
+    fresh = RemoteBackend("http://testserver", http=http)
+    assert fresh.login(role, email, _PW)["ok"] is False
+    assert fresh.login(role, email, "brand-new-password")["ok"] is True
+    assert confirm(code).status_code == 400  # a code works once
+    with pytest.raises(PermissionError):
+        backend.call("get_labs")  # the old session was signed out
+
+
+def test_codes_expire_and_wrong_guesses_burn_them(
+    server: tuple[TestClient, ServerState, list[tuple[str, str]], dict[str, str]],
+    db_session_factory: Factory,
+) -> None:
+    http, state, outbox, _ = server
+    _both_accounts(db_session_factory)
+    clock = [0.0]
+    state.reset_codes = onboarding.ResetCodes(clock=lambda: clock[0])
+
+    def ask() -> str:
+        state.login_throttle = onboarding.Throttle()
+        http.post("/api/request_reset", json={"email": "sam@uni.edu"})
+        return _code_in(outbox[-1][1])
+
+    def confirm(code: str) -> int:
+        return http.post(
+            "/api/confirm_reset",
+            json={"email": "sam@uni.edu", "code": code, "new_password": "brand-new-password"},
+        ).status_code
+
+    late = ask()
+    clock[0] = 16 * 60  # past the 15 minutes
+    assert confirm(late) == 400
+
+    burnt = ask()
+    for _ in range(onboarding.RESET_CODE_ATTEMPTS):
+        assert confirm("999999" if burnt != "999999" else "888888") == 400
+    assert confirm(burnt) == 400  # too many wrong guesses: even the real code is dead
+
+    newest = ask()
+    assert confirm(newest) == 200
+
+
+def test_the_reset_form_does_not_reveal_which_emails_have_accounts(
+    server: tuple[TestClient, ServerState, list[tuple[str, str]], dict[str, str]],
+    db_session_factory: Factory,
+) -> None:
+    http, state, outbox, _ = server
+    _both_accounts(db_session_factory)
+    known = http.post("/api/request_reset", json={"email": "sam@uni.edu"})
+    state.login_throttle = onboarding.Throttle()
+    unknown = http.post("/api/request_reset", json={"email": "ghost@uni.edu"})
+    assert known.json() == unknown.json()
+    assert [to for to, _ in outbox] == ["sam@uni.edu"]  # but no mail goes to a stranger
+
+    with db_session_factory() as db:
+        db.query(Student).filter_by(email="sam@uni.edu").one().disabled = True
+        db.commit()
+    state.login_throttle = onboarding.Throttle()
+    http.post("/api/request_reset", json={"email": "sam@uni.edu"})
+    assert len(outbox) == 1  # disabled accounts get nothing
+
+    from eaal_platform.db.models import EmailSettings
+
+    with db_session_factory() as db:
+        db.query(EmailSettings).delete()
+        db.commit()
+    assert (
+        "isn't set up"
+        in http.post("/api/request_reset", json={"email": "x@uni.edu"}).json()["error"]
+    )

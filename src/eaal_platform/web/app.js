@@ -338,6 +338,108 @@ function showServerModal(settings) {
 
 let prefillLoginEmail = "";
 
+// Forgot password: 1) the account's email, 2) the 6-digit code that was emailed plus a new password.
+function showForgotPassword(startEmail = "") {
+  document.getElementById("root").classList.add("auth-mode");
+  const frame = (inner) => {
+    document.getElementById("authScreen").innerHTML = `
+      ${authHero()}
+      <div class="auth-panel"><div class="auth-card">
+        <div class="icon-tile">${icon("lock")}</div>
+        <h2>Reset your password</h2>
+        ${inner}
+      </div></div>`;
+  };
+  const stepEmail = (email) => {
+    frame(`
+      <p class="subtitle">Enter the email of your account. We'll email you a 6-digit code.</p>
+      <div class="auth-form">
+        <label>Email <input type="text" id="resetEmail" placeholder="you@school.edu" /></label>
+        <p class="auth-error" id="resetError"></p>
+        <button class="primary auth-submit" id="sendCode">Email me a code</button>
+        <button class="auth-link" id="resetBack" style="margin-top:10px;">Back to log in</button>
+      </div>`);
+    document.getElementById("resetEmail").value = email;
+    document.getElementById("resetBack").addEventListener("click", showLogin);
+    const send = () => {
+      const value = document.getElementById("resetEmail").value.trim();
+      const errorEl = document.getElementById("resetError");
+      if (!value) {
+        errorEl.textContent = "Enter your email address.";
+        return;
+      }
+      const button = document.getElementById("sendCode");
+      button.disabled = true;
+      button.textContent = "Sending…";
+      api()
+        .request_password_reset(value)
+        .then((result) => {
+          if (!result.ok) {
+            errorEl.textContent = result.error || "Couldn't send the code.";
+            button.disabled = false;
+            button.textContent = "Email me a code";
+            return;
+          }
+          stepCode(value, result.message);
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+          button.disabled = false;
+          button.textContent = "Email me a code";
+        });
+    };
+    document.getElementById("sendCode").addEventListener("click", send);
+    document.getElementById("resetEmail").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") send();
+    });
+  };
+  const stepCode = (email, message) => {
+    frame(`
+      <p class="notice notice-ok">${escapeHtml(message)}</p>
+      <div class="auth-form">
+        <label>6-digit code <input type="text" id="resetCode" inputmode="numeric" maxlength="6" placeholder="123456" /></label>
+        <label>New password <input type="password" id="resetNew" placeholder="At least 8 characters" autocomplete="new-password" /></label>
+        <label>Repeat new password <input type="password" id="resetRepeat" autocomplete="new-password" /></label>
+        <p class="auth-error" id="resetError"></p>
+        <button class="primary auth-submit" id="confirmReset">Change my password</button>
+        <button class="auth-link" id="resetAgain" style="margin-top:10px;">Send a new code</button>
+      </div>`);
+    document.getElementById("resetAgain").addEventListener("click", () => stepEmail(email));
+    document.getElementById("confirmReset").addEventListener("click", () => {
+      const errorEl = document.getElementById("resetError");
+      const code = document.getElementById("resetCode").value.trim();
+      const password = document.getElementById("resetNew").value;
+      if (!/^\d{6}$/.test(code)) {
+        errorEl.textContent = "Enter the 6-digit code from the email.";
+        return;
+      }
+      if (password.length < 8) {
+        errorEl.textContent = "Password must be at least 8 characters.";
+        return;
+      }
+      if (password !== document.getElementById("resetRepeat").value) {
+        errorEl.textContent = "The two passwords don't match.";
+        return;
+      }
+      api()
+        .confirm_password_reset(email, code, password)
+        .then((result) => {
+          if (!result.ok) {
+            errorEl.textContent = result.error || "That didn't work.";
+            return;
+          }
+          prefillLoginEmail = email;
+          loginNotice = result.message;
+          showLogin();
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+        });
+    });
+  };
+  stepEmail(startEmail);
+}
+
 function showLogin() {
   firstLoginPending = false;
   stopLabMode();
@@ -360,6 +462,7 @@ function showLogin() {
           <label>Password <input type="password" id="loginPassword" placeholder="••••••••" /></label>
           <p class="auth-error" id="loginError"></p>
           <button class="primary auth-submit" id="loginButton">Log in</button>
+          <button class="auth-link" id="forgotPassword" style="display:none; margin-top:10px;">Forgot your password?</button>
         </div>
         <div class="auth-footer">
           New to CAVY? <button class="auth-link" id="goToCreateAccount">Create an account</button>
@@ -376,6 +479,18 @@ function showLogin() {
     });
   });
   renderServerLine();
+
+  // "Forgot your password?" works by emailing a code, so it only shows when the server can send email.
+  api()
+    .get_signup_info()
+    .then((info) => {
+      const link = document.getElementById("forgotPassword");
+      if (link && info && info.email_signup) link.style.display = "";
+    })
+    .catch(() => {});
+  document.getElementById("forgotPassword").addEventListener("click", () =>
+    showForgotPassword(document.getElementById("loginEmail").value.trim())
+  );
 
   document.getElementById("goToCreateAccount").addEventListener("click", showCreateAccount);
   if (prefillLoginEmail) {

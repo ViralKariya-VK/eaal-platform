@@ -507,6 +507,9 @@ def change_password(
         db_session.commit()
 
 
+DEFAULT_ADMIN_EMAIL = "admin@cavy.local"
+
+
 def reset_admin_password(
     session_factory: sessionmaker[OrmSession], email: str | None = None
 ) -> tuple[str, str]:
@@ -514,12 +517,22 @@ def reset_admin_password(
 
     Meant for the server's own command line (the person with access to the
     machine), for when the only admin has forgotten their password. With no
-    ``email`` it works only if there is exactly one admin.
+    ``email`` it works only if there is exactly one admin, and if there is none
+    it creates the first one (``admin@cavy.local``).
     """
     with session_factory() as db_session:
         admins = db_session.query(Admin).order_by(Admin.id).all()
-        if not admins:
-            raise ValueError("There is no administrator yet. Open the admin panel to create one.")
+        if not admins and email is None:
+            # Nobody has set the admin panel up yet: make the first administrator.
+            first = Admin(
+                display_name="Administrator",
+                email=DEFAULT_ADMIN_EMAIL,
+                password_hash="",
+            )
+            db_session.add(first)
+            admins = [first]
+        elif not admins:
+            raise ValueError("There is no administrator yet. Run this without an email first.")
         if email is None:
             if len(admins) > 1:
                 known = ", ".join(a.email for a in admins)

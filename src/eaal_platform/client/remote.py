@@ -129,6 +129,21 @@ class RemoteBackend:
         result: dict[str, Any] = response.json()["result"]
         return result
 
+    def request_reset(self, email: str) -> dict[str, Any]:
+        response = self._post("/api/request_reset", {"email": email}, auth=False)
+        if response.status_code != 200:
+            raise ValueError(self._error_message(response))
+        result: dict[str, Any] = response.json()["result"]
+        return result
+
+    def confirm_reset(self, email: str, code: str, new_password: str) -> dict[str, Any]:
+        body = {"email": email, "code": code, "new_password": new_password}
+        response = self._post("/api/confirm_reset", body, auth=False)
+        if response.status_code != 200:
+            raise ValueError(self._error_message(response))
+        result: dict[str, Any] = response.json()["result"]
+        return result
+
     def call(self, method: str, *args: Any) -> Any:
         response = self._post(f"/api/call/{method}", {"args": list(args)})
         self._raise_if_signed_out(response)

@@ -285,6 +285,26 @@ class ClientApi:
             return {"ok": False, "error": str(exc)}
         return result
 
+    def request_password_reset(self, email: str) -> dict[str, Any]:
+        """Forgot password: have the server email a one-time code."""
+        if not isinstance(self._backend, RemoteBackend):
+            return {"ok": False, "error": "Connect to your classroom server first."}
+        try:
+            result: dict[str, Any] = self._backend.request_reset(email)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return result
+
+    def confirm_password_reset(self, email: str, code: str, new_password: str) -> dict[str, Any]:
+        """Choose a new password with the code from the email."""
+        if not isinstance(self._backend, RemoteBackend):
+            return {"ok": False, "error": "Connect to your classroom server first."}
+        try:
+            result: dict[str, Any] = self._backend.confirm_reset(email, code, new_password)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return result
+
     def enter_lab_mode(self) -> dict[str, Any]:
         """A lab is starting: go full screen and block the ways of switching away."""
         return {"ok": True, **self._lab_lock.engage()}

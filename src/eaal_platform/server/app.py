@@ -130,6 +130,7 @@ class ServerState:
         self._versions: dict[str, int] = {}
         self._changed = threading.Condition()
         self.login_throttle = onboarding.Throttle()
+        self.reset_codes = onboarding.ResetCodes()
         self.send_mail = mailer.send_mail  # tests replace this so nothing is really sent
         self.server_hint = ""  # a line telling students where to find the server, if known
 
@@ -271,6 +272,12 @@ class FirstLoginRequest(BaseModel):
     email: str
 
 
+class ResetConfirmRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
 class CallRequest(BaseModel):
     args: list[Any] = []
 
@@ -321,6 +328,29 @@ def create_app(state: ServerState) -> FastAPI:
         try:
             result = onboarding.request_first_login(
                 state, payload.email, computer, sender=lambda *a: state.send_mail(*a)
+            )
+        except onboarding.LoginRequestError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        state.bump(TOPIC_ACCOUNTS)
+        return JSONResponse({"result": result})
+
+    @app.post("/api/request_reset")
+    def request_reset(payload: FirstLoginRequest, http: Request) -> JSONResponse:
+        """Forgot password: email a one-time code (students and teachers; no token needed)."""
+        computer = http.client.host if http.client else "?"
+        try:
+            result = onboarding.request_password_reset(
+                state, payload.email, computer, sender=lambda *a: state.send_mail(*a)
+            )
+        except onboarding.LoginRequestError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"result": result})
+
+    @app.post("/api/confirm_reset")
+    def confirm_reset(payload: ResetConfirmRequest) -> JSONResponse:
+        try:
+            result = onboarding.confirm_password_reset(
+                state, payload.email, payload.code, payload.new_password
             )
         except onboarding.LoginRequestError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
