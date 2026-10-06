@@ -608,6 +608,24 @@ class ResourceStudent(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
 
 
+class EmailSettings(Base):
+    """The mail account the server sends login emails from (one row).
+
+    The password is the mail provider's "app password", kept here so the server
+    can send without anyone typing it again. The admin panel never shows it
+    back, and the database browser hides the column.
+    """
+
+    __tablename__ = "email_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    host: Mapped[str] = mapped_column(String(200), nullable=False, default="smtp.gmail.com")
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    username: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    password: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    from_name: Mapped[str] = mapped_column(String(100), nullable=False, default="CAVY Team")
+
+
 class AllowedEmail(Base):
     """An email address an administrator has approved to create an account.
 

@@ -164,6 +164,7 @@ const SECTIONS = [
   ["database", "Database", showDatabase],
   ["audit", "Audit log", showAudit],
   ["ai", "AI assistant", showAi],
+  ["email", "Email", showEmail],
   ["backup", "Backup", showBackup],
 ];
 
@@ -311,16 +312,22 @@ function showOverview(quiet) {
       b.addEventListener("click", () => showSession(Number(b.dataset.session)))
     );
     main().querySelectorAll("[data-kick]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        try {
-          await post(`/signed-in/${b.dataset.kick}/sign-out`);
-          toast(`${b.dataset.name} was signed out.`);
-          showOverview();
-        } catch (err) {
-          toast(err.message);
-          showOverview();
-        }
-      })
+      b.addEventListener("click", () =>
+        confirmBox(
+          `Sign ${b.dataset.name} out?`,
+          "They are returned to the login screen at once. Work they haven't saved may be lost.",
+          "Sign out",
+          async () => {
+            try {
+              await post(`/signed-in/${b.dataset.kick}/sign-out`);
+              toast(`${b.dataset.name} was signed out.`);
+            } catch (err) {
+              toast(err.message);
+            }
+            showOverview();
+          }
+        )
+      )
     );
     const all = document.getElementById("signOutAll");
     if (all)
@@ -691,12 +698,69 @@ async function userForm(existing) {
   );
 }
 
+// -- email -----------------------------------------------------------------------
+
+function showEmail() {
+  return guarded(async () => {
+    const e = await get("/email");
+    main().innerHTML = `
+      <div class="page-head"><div><h1>Email</h1>
+        <p class="muted">The mail account CAVY sends students their first login from. Once it works, a student only types their approved university email on the sign-up screen; CAVY emails them a username and a temporary password, and they choose their own password when they first log in. Until it's set up, students use the normal sign-up form.</p></div>
+        <span class="pill ${e.configured ? "ok" : "warn"}">${e.configured ? "Set up" : "Not set up"}</span></div>
+      <div class="card">
+        <h3>Mail account</h3>
+        <label>Email address of the sending account <input id="mUser" value="${esc(e.username)}" placeholder="cavy.platform@gmail.com" /></label>
+        <label>App password <input id="mPass" type="password" autocomplete="new-password" placeholder="${e.has_password ? "Saved. Leave empty to keep it." : "The 16-letter app password"}" /></label>
+        <label>Sender name students see <input id="mName" value="${esc(e.from_name)}" /></label>
+        <div class="cols2"><label>Mail server <input id="mHost" value="${esc(e.host)}" /></label><label>Port <input id="mPort" type="number" value="${e.port}" /></label></div>
+        <p class="error" id="mError"></p>
+        <div class="actions" style="justify-content:flex-start"><button class="primary" id="mSave">Save</button></div>
+      </div>
+      <div class="card">
+        <h3>Send a test email</h3>
+        <div class="inline-add"><input id="mTo" placeholder="your own email address" /><button id="mTest" ${e.configured ? "" : "disabled"}>Send test</button></div>
+        <p class="muted" id="mTestResult"></p>
+      </div>
+      <div class="card">
+        <h3>Setting up a Gmail account</h3>
+        <ol class="muted" style="line-height:1.7;margin:6px 0 0 18px">
+          <li>Use a personal Gmail account made for CAVY (work or school accounts often block app passwords).</li>
+          <li>In that account: Google Account &rarr; Security &rarr; turn on <b>2-Step Verification</b>.</li>
+          <li>Then Security &rarr; <b>App passwords</b> &rarr; create one named CAVY. Copy the 16 letters (spaces don't matter).</li>
+          <li>Paste it above with the Gmail address; keep the server <code>smtp.gmail.com</code>, port <code>587</code>. Save, then send yourself a test.</li>
+        </ol>
+        <p class="muted">The password is stored on this computer only and is never shown again. Gmail allows about 500 emails a day.</p>
+      </div>`;
+    document.getElementById("mSave").addEventListener("click", async () => {
+      const v = (id) => document.getElementById(id).value.trim();
+      try {
+        await post("/email", { username: v("mUser"), password: document.getElementById("mPass").value, from_name: v("mName"), host: v("mHost"), port: Number(v("mPort")) });
+        toast("Saved.");
+        showEmail();
+      } catch (err) {
+        document.getElementById("mError").textContent = err.message;
+      }
+    });
+    document.getElementById("mTest").addEventListener("click", async () => {
+      const out = document.getElementById("mTestResult");
+      out.textContent = "Sending…";
+      try {
+        await post("/email/test", { to: document.getElementById("mTo").value });
+        out.textContent = "Sent. Check that inbox (and its spam folder).";
+      } catch (err) {
+        out.textContent = err.message;
+      }
+    });
+    // (No auto-refresh: it would redraw over a half-typed form.)
+  });
+}
+
 // -- courses & classes ----------------------------------------------------------
 
 function showCourses(quiet) {
   return guarded(async () => {
     const data = await get("/courses");
-    const chip = (text, attrs) => `<span class="chip">${esc(text)} <button class="chip-x" ${attrs} title="Remove">&times;</button></span>`;
+    const chip = (text, attrs) => `<span class="chip">${esc(text)} <button class="chip-x" ${attrs} data-option-name="${esc(text)}" title="Remove">&times;</button></span>`;
     const card = (c) => {
       const free = data.professors.filter((p) => !c.professors.some((t) => t.id === p.id));
       return `
@@ -752,7 +816,11 @@ function showCourses(quiet) {
       })
     );
     main().querySelectorAll("[data-remove-option]").forEach((b) =>
-      b.addEventListener("click", () => run(() => post("/courses/options/remove", { id: Number(b.dataset.removeOption) })))
+      b.addEventListener("click", () =>
+        confirmBox(`Remove ${b.dataset.optionName}?`, "It disappears from the sign-up and lab pickers. One that students or labs still use can't be removed.", "Remove", () =>
+          run(() => post("/courses/options/remove", { id: Number(b.dataset.removeOption) }))
+        )
+      )
     );
     const teaching = (courseId) => data.courses.find((c) => c.id === courseId).professors.map((p) => p.id);
     main().querySelectorAll("[data-teach]").forEach((b) =>
@@ -834,13 +902,17 @@ function showLabs(quiet) {
         { empty: "No labs yet." }
       )}</div>`;
     main().querySelectorAll("[data-archive]").forEach((button) =>
-      button.addEventListener("click", async () => {
-        try {
-          await post(`/labs/${button.dataset.archive}/archive`, { archived: button.dataset.state !== "true" });
-          showLabs();
-        } catch (err) {
-          toast(err.message);
-        }
+      button.addEventListener("click", () => {
+        const hiding = button.dataset.state !== "true";
+        confirmBox(
+          hiding ? "Archive this lab?" : "Restore this lab?",
+          hiding ? "Students stop seeing it and can't start it. Nothing is deleted." : "Students can see and start it again.",
+          hiding ? "Archive" : "Restore",
+          async () => {
+            await post(`/labs/${button.dataset.archive}/archive`, { archived: !hiding });
+            showLabs();
+          }
+        );
       })
     );
     if (!quiet) autoRefresh("labs", showLabs);

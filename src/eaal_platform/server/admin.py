@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, Table, cast, func, or_, select
 from sqlalchemy.engine import Row
 
+from eaal_platform import mailer
 from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
@@ -78,7 +79,7 @@ from eaal_platform.server.app import (
     ServerState,
 )
 
-_HIDDEN_COLUMNS = frozenset({"password_hash", "data"})  # "data": uploaded file bytes
+_HIDDEN_COLUMNS = frozenset({"password_hash", "password", "data"})  # "data": file bytes
 _CELL_PREVIEW_CHARS = 200
 _MAX_PAGE_SIZE = 200
 _LOGIN_WINDOW_SECONDS = 300
@@ -203,6 +204,18 @@ class OptionRequest(BaseModel):
 class ProfessorCoursesRequest(BaseModel):
     professor_id: int
     course_ids: list[int]
+
+
+class EmailSettingsRequest(BaseModel):
+    host: str = "smtp.gmail.com"
+    port: int = 587
+    username: str
+    password: str | None = None  # blank keeps the saved one
+    from_name: str = "CAVY Team"
+
+
+class EmailTestRequest(BaseModel):
+    to: str
 
 
 class IdRequest(BaseModel):
@@ -627,6 +640,49 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         state.revoke_user(request.role, request.id, "Your account was removed by an administrator.")
         audit(admin, "delete_account", label)
         state.bump(TOPIC_ACCOUNTS)
+        return {"ok": True}
+
+    # -- email (login details for students' first sign-in) ----------------------------
+
+    @router.get("/email")
+    def email_settings(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        return mailer.describe(state.session_factory)
+
+    @router.post("/email")
+    def save_email_settings(
+        request: EmailSettingsRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        try:
+            mailer.save_settings(
+                state.session_factory,
+                host=request.host,
+                port=request.port,
+                username=request.username,
+                password=request.password,
+                from_name=request.from_name,
+            )
+        except mailer.MailError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, "save_email_settings", request.username)
+        return mailer.describe(state.session_factory)
+
+    @router.post("/email/test")
+    def send_test_email(
+        request: EmailTestRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        settings = mailer.load_settings(state.session_factory)
+        if settings is None:
+            raise HTTPException(status_code=400, detail="Save the email settings first.")
+        try:
+            state.send_mail(
+                settings,
+                request.to.strip(),
+                "CAVY test email",
+                "This is a test from the CAVY admin panel. Email is working.",
+            )
+        except mailer.MailError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, "send_test_email", request.to.strip())
         return {"ok": True}
 
     # -- courses, years, divisions, batches; which professor teaches what ------------

@@ -110,6 +110,25 @@ class RemoteBackend:
         options: list[dict[str, Any]] = response.json()
         return options
 
+    def get_signup_info(self) -> dict[str, Any]:
+        """Whether this server emails students their first login (needs no sign-in)."""
+        try:
+            response = self._http.get(f"{self.base_url}/api/signup_info")
+        except httpx.HTTPError as exc:
+            raise ServerUnreachableError(
+                f"Can't reach the CAVY server at {self.base_url}."
+            ) from exc
+        info: dict[str, Any] = response.json() if response.status_code == 200 else {}
+        return {"email_signup": bool(info.get("email_signup"))}
+
+    def request_login(self, email: str) -> dict[str, Any]:
+        """Ask the server to email a first-login password to this (approved) address."""
+        response = self._post("/api/request_login", {"email": email}, auth=False)
+        if response.status_code != 200:
+            raise ValueError(self._error_message(response))
+        result: dict[str, Any] = response.json()["result"]
+        return result
+
     def call(self, method: str, *args: Any) -> Any:
         response = self._post(f"/api/call/{method}", {"args": list(args)})
         self._raise_if_signed_out(response)

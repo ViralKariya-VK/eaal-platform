@@ -336,7 +336,10 @@ function showServerModal(settings) {
   });
 }
 
+let prefillLoginEmail = "";
+
 function showLogin() {
+  firstLoginPending = false;
   stopLabMode();
   stopLiveUpdates();
   document.getElementById("root").classList.add("auth-mode");
@@ -375,6 +378,11 @@ function showLogin() {
   renderServerLine();
 
   document.getElementById("goToCreateAccount").addEventListener("click", showCreateAccount);
+  if (prefillLoginEmail) {
+    document.getElementById("loginEmail").value = prefillLoginEmail;
+    prefillLoginEmail = "";
+    document.getElementById("loginPassword").focus();
+  }
 
   const doLogin = () => {
     const email = document.getElementById("loginEmail").value.trim();
@@ -388,7 +396,7 @@ function showLogin() {
       .login(loginRole, email, password)
       .then((result) => {
         if (result.ok) {
-          enterApp(result.role, result.name, result.must_change_password);
+          enterApp(result.role, result.name, result.must_change_password, result.needs_details);
         } else {
           errorEl.textContent = result.error || "Login failed.";
         }
@@ -501,6 +509,14 @@ function showCreateAccount() {
   // none set up the old optional enrolment number is shown instead.
   let signupCourses = [];
   if (loginRole === "student") {
+    // When the server can send email, a student only enters their email: the server
+    // creates the account and emails a temporary password (see showFirstLogin).
+    api()
+      .get_signup_info()
+      .then((info) => {
+        if (info && info.email_signup) showEmailSignup();
+      })
+      .catch(() => {});
     api()
       .get_academic_options()
       .then((courses) => {
@@ -574,6 +590,146 @@ function showCreateAccount() {
         errorEl.textContent = errorText(err);
       });
   });
+}
+
+function showEmailSignup() {
+  const form = document.querySelector(".auth-form");
+  if (!form || loginRole !== "student") return;
+  form.innerHTML = `
+    <p class="notice">Enter your university email. We'll email you your username (your email) and a temporary password. You choose your own password the first time you log in.</p>
+    <label>University email <input type="text" id="firstEmail" placeholder="you@school.edu" /></label>
+    <p class="auth-error" id="firstError"></p>
+    <button class="primary auth-submit" id="sendLoginButton">Email me my login</button>`;
+  const send = () => {
+    const email = document.getElementById("firstEmail").value.trim();
+    const errorEl = document.getElementById("firstError");
+    const button = document.getElementById("sendLoginButton");
+    if (!email) {
+      errorEl.textContent = "Enter your email address.";
+      return;
+    }
+    errorEl.textContent = "";
+    button.disabled = true;
+    button.textContent = "Sending…";
+    api()
+      .request_login(email)
+      .then((result) => {
+        if (!result.ok) {
+          errorEl.textContent = result.error || "Couldn't send the email.";
+          button.disabled = false;
+          button.textContent = "Email me my login";
+          return;
+        }
+        form.innerHTML = `
+          <div class="notice notice-ok">${escapeHtml(result.message)}</div>
+          <p class="muted">Open the email, then log in with the username and temporary password in it. It can take a minute to arrive.</p>
+          <button class="primary auth-submit" id="goLoginAfterEmail">Go to log in</button>`;
+        document.getElementById("goLoginAfterEmail").addEventListener("click", () => {
+          prefillLoginEmail = email;
+          loginRole = "student";
+          showLogin();
+        });
+      })
+      .catch((err) => {
+        errorEl.textContent = errorText(err);
+        button.disabled = false;
+        button.textContent = "Email me my login";
+      });
+  };
+  document.getElementById("sendLoginButton").addEventListener("click", send);
+  document.getElementById("firstEmail").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") send();
+  });
+}
+
+// A student's first sign-in (temporary password from the email): choose a password
+// and say where they study, before anything else.
+function showFirstLogin(needsDetails) {
+  firstLoginPending = true;
+  document.getElementById("sidebar").innerHTML =
+    `<div class="sidebar-scroll"><p class="muted" style="padding:16px;">Finish setting up your account to continue.</p></div>`;
+  const render = (courses) => {
+    setScreen(
+      `
+    <div class="page-heading"><div><h1>Welcome to CAVY</h1><p class="subtitle">Choose your own password${courses.length ? " and tell us where you study" : ""}. The temporary one from the email stops working afterwards.</p></div></div>
+    <div class="card" style="max-width:520px;">
+      <div class="auth-form">
+        <label>New password <input type="password" id="firstPassword" placeholder="At least 8 characters" autocomplete="new-password" /></label>
+        <label>Repeat new password <input type="password" id="firstRepeat" autocomplete="new-password" /></label>
+        ${
+          courses.length
+            ? `<label>Course <select id="firstCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.name })), "Choose your course")}</select></label>
+               <div class="field-pair">
+                 <label>Year <select id="firstYear"></select></label>
+                 <label>Roll Number <input type="text" id="firstRoll" placeholder="e.g. 27" /></label>
+               </div>
+               <div class="field-pair">
+                 <label>Division <select id="firstDivision"></select></label>
+                 <label>Batch <select id="firstBatch"></select></label>
+               </div>`
+            : ""
+        }
+        <p class="auth-error" id="firstLoginError"></p>
+        <button class="primary" id="firstLoginButton">Save and continue</button>
+      </div>
+    </div>`,
+      null,
+      { keepSidebar: true }
+    );
+    if (courses.length) wireCohortSelects("first", courses);
+    document.getElementById("firstLoginButton").addEventListener("click", () => {
+      const errorEl = document.getElementById("firstLoginError");
+      const password = document.getElementById("firstPassword").value;
+      if (password.length < 8) {
+        errorEl.textContent = "Password must be at least 8 characters.";
+        return;
+      }
+      if (password !== document.getElementById("firstRepeat").value) {
+        errorEl.textContent = "The two passwords don't match.";
+        return;
+      }
+      let cohort = null;
+      if (courses.length) {
+        cohort = { ...readCohort("first"), roll_number: document.getElementById("firstRoll").value.trim() || null };
+        const needsDivision = !document.getElementById("firstDivision").closest("label").hidden;
+        const needsBatch = !document.getElementById("firstBatch").closest("label").hidden;
+        const missing = !cohort.course_id ? "Choose your course."
+          : !cohort.year ? "Choose your year."
+          : needsDivision && !cohort.division ? "Choose your division."
+          : needsBatch && !cohort.batch ? "Choose your batch."
+          : !cohort.roll_number ? "Enter your roll number."
+          : null;
+        if (missing) {
+          errorEl.textContent = missing;
+          return;
+        }
+      }
+      errorEl.textContent = "";
+      api()
+        .complete_first_login(password, cohort)
+        .then((result) => {
+          if (!result.ok) {
+            errorEl.textContent = result.error || "That didn't work.";
+            return;
+          }
+          firstLoginPending = false;
+          renderSidebar();
+          showLabs();
+          maybePromptAiSetup();
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+        });
+    });
+  };
+  if (!needsDetails) {
+    render([]);
+    return;
+  }
+  api()
+    .get_academic_options()
+    .then((courses) => render(courses || []))
+    .catch(() => render([]));
 }
 
 // -- Sidebar -------------------------------------------------------
@@ -1120,39 +1276,51 @@ function showProfile() {
       const roleLabel = profile.role === "professor" ? "Teacher" : "Student";
       setScreen(
         `
-    <div class="page-heading"><div><h1>Profile</h1><p class="subtitle">Your CAVY account.</p></div></div>
+    <div class="page-heading"><div><h1>Profile</h1><p class="subtitle">Your CAVY account, password and AI assistant.</p></div></div>
     ${
       profile.must_change_password
-        ? `<div class="notice notice-warn" style="max-width:420px;">Your password was reset by your teacher. Please choose a new one below before you continue.</div>`
+        ? `<div class="notice notice-warn">Your password was reset. Please choose a new one before you continue.</div>`
         : ""
     }
-    <div class="card" style="max-width:420px;">
-      <p><b>${escapeHtml(profile.name)}</b> <span class="pill pill-neutral">${roleLabel}</span></p>
-      <p class="muted" style="margin-top:6px;">${escapeHtml(profile.email || "")}</p>
-      ${
-        profile.course
-          ? `<p class="muted">${escapeHtml([profile.course, profile.year_label, profile.division && "Div " + profile.division, profile.batch && "Batch " + profile.batch].filter(Boolean).join(" · "))}</p>`
-          : ""
-      }
-      ${profile.roll_number ? `<p class="muted">Roll No. ${escapeHtml(profile.roll_number)}</p>` : profile.enrollment_no ? `<p class="muted">Enrolment No. ${escapeHtml(profile.enrollment_no)}</p>` : ""}
-      <p class="muted" id="teacherLine" style="margin-top:6px;"></p>
-      <button class="danger" id="logoutButton" style="margin-top:16px;">Log Out</button>
-    </div>
-    <div class="card" style="max-width:420px; margin-top:16px;">
-      <h3 style="margin-top:0;">Change Password</h3>
-      <div class="auth-form" style="margin-top:12px;">
-        <label>Current password <input type="password" id="currentPassword" autocomplete="current-password" /></label>
-        <label>New password <input type="password" id="newPassword" placeholder="At least 8 characters" autocomplete="new-password" /></label>
-        <label>Repeat new password <input type="password" id="repeatPassword" autocomplete="new-password" /></label>
-        <p class="auth-error" id="passwordError"></p>
-        <button class="primary" id="changePasswordButton">Update Password</button>
+    <div class="profile-layout">
+      <div class="card profile-card">
+        <div class="profile-head">
+          <div class="avatar avatar-lg">${escapeHtml((profile.name || "?").charAt(0).toUpperCase())}</div>
+          <div><h2>${escapeHtml(profile.name)}</h2><span class="pill pill-neutral">${roleLabel}</span></div>
+        </div>
+        <dl class="profile-facts">
+          <div><dt>Email</dt><dd>${escapeHtml(profile.email || "—")}</dd></div>
+          ${
+            profile.course
+              ? `<div><dt>Course</dt><dd>${escapeHtml(profile.course)}</dd></div>
+                 ${profile.year_label ? `<div><dt>Year</dt><dd>${escapeHtml(profile.year_label)}</dd></div>` : ""}
+                 ${profile.division ? `<div><dt>Division</dt><dd>${escapeHtml(profile.division)}</dd></div>` : ""}
+                 ${profile.batch ? `<div><dt>Batch</dt><dd>${escapeHtml(profile.batch)}</dd></div>` : ""}`
+              : ""
+          }
+          ${profile.roll_number ? `<div><dt>Roll No.</dt><dd>${escapeHtml(profile.roll_number)}</dd></div>` : profile.enrollment_no ? `<div><dt>Enrolment No.</dt><dd>${escapeHtml(profile.enrollment_no)}</dd></div>` : ""}
+          ${profile.role === "student" ? `<div><dt>Teacher</dt><dd id="teacherLine">…</dd></div>` : ""}
+        </dl>
+        <button class="danger" id="logoutButton">Log Out</button>
       </div>
-    </div>
-    <div class="card" style="max-width:420px; margin-top:16px;">
-      <h3 style="margin-top:0;">AI Assistant</h3>
-      <p class="muted" id="aiStatusLine" style="margin:6px 0 14px;">Checking the assistant&hellip;</p>
-      <div id="aiConnectHost"></div>
-      <button class="ghost" id="aiForgetButton" style="margin-top:12px; display:none;">Remove my key from this computer</button>
+      <div class="profile-side">
+        <div class="card">
+          <h3>AI Assistant</h3>
+          <p class="muted" id="aiStatusLine">Checking the assistant&hellip;</p>
+          <div id="aiConnectHost"></div>
+          <button class="ghost" id="aiForgetButton" style="margin-top:12px; display:none;">Remove my key from this computer</button>
+        </div>
+        <div class="card">
+          <h3>Change Password</h3>
+          <div class="auth-form">
+            <label>Current password <input type="password" id="currentPassword" autocomplete="current-password" /></label>
+            <label>New password <input type="password" id="newPassword" placeholder="At least 8 characters" autocomplete="new-password" /></label>
+            <label>Repeat new password <input type="password" id="repeatPassword" autocomplete="new-password" /></label>
+            <p class="auth-error" id="passwordError"></p>
+            <button class="primary" id="changePasswordButton">Update Password</button>
+          </div>
+        </div>
+      </div>
     </div>`,
         "profile"
       );
@@ -1168,7 +1336,7 @@ function showProfile() {
           .get_my_teacher()
           .then((teacher) => {
             const el = document.getElementById("teacherLine");
-            if (el) el.textContent = teacher ? `Your teacher: ${teacher}` : "You aren't in a teacher's class yet.";
+            if (el) el.textContent = teacher || "Not in a class yet";
           });
       }
     });
@@ -3711,7 +3879,23 @@ function startLiveUpdates() {
 
 // -- Bootstrap -------------------------------------------------------
 
-function enterApp(role, name, mustChangePassword = false) {
+// The "Profile" label and avatar at the top right open the profile screen (never from
+// inside a lab: that would be a way out of lab mode).
+let firstLoginPending = false;
+function openProfileFromHeader() {
+  if (!currentRole || labMode || firstLoginPending) return;
+  showProfile();
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const link = document.getElementById("profileLink");
+  if (!link) return;
+  link.addEventListener("click", openProfileFromHeader);
+  link.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") openProfileFromHeader();
+  });
+});
+
+function enterApp(role, name, mustChangePassword = false, needsDetails = false) {
   loginNotice = "";
   startLiveUpdates();
   currentRole = role;
@@ -3720,7 +3904,9 @@ function enterApp(role, name, mustChangePassword = false) {
   document.getElementById("studentAvatar").textContent = (name || "?").charAt(0).toUpperCase();
   document.getElementById("studentAvatar").title = name || "";
   renderSidebar();
-  if (mustChangePassword) {
+  if (role === "student" && mustChangePassword) {
+    showFirstLogin(needsDetails);
+  } else if (mustChangePassword) {
     showProfile();
   } else if (role === "professor") {
     showMyLabs();

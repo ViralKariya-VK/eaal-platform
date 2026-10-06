@@ -26,7 +26,13 @@ def test_create_account_then_login_as_student(
     assert created["ok"] is True
 
     result = api.login("student", "ada@example.com", "hunter2-hunter2")
-    assert result == {"ok": True, "role": "student", "name": "Ada", "must_change_password": False}
+    assert result == {
+        "ok": True,
+        "role": "student",
+        "name": "Ada",
+        "must_change_password": False,
+        "needs_details": False,
+    }
     assert api.get_student_name() == "Ada"
     logger.stop()
 

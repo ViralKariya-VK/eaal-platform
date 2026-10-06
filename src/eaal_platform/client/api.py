@@ -275,6 +275,16 @@ class ClientApi:
         self._lab_lock.release()
         self._host.stop()
 
+    def request_login(self, email: str) -> dict[str, Any]:
+        """A student's first sign-in: have the server email them their login details."""
+        if not isinstance(self._backend, RemoteBackend):
+            return {"ok": False, "error": "Connect to your classroom server first."}
+        try:
+            result: dict[str, Any] = self._backend.request_login(email)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return result
+
     def enter_lab_mode(self) -> dict[str, Any]:
         """A lab is starting: go full screen and block the ways of switching away."""
         return {"ok": True, **self._lab_lock.engage()}

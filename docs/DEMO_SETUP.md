@@ -121,7 +121,15 @@ computers talk to each other.
    the courses they teach. Students choose their course, year, division, batch
    and roll number from these lists when they sign up; a professor can only add
    students and aim labs at courses assigned to them.
-7. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
+7. **Email for first logins** (optional but recommended). Make a Gmail account for
+   CAVY, turn on 2-Step Verification, create an **App password**, then in the
+   admin panel open **Email**, enter the address and app password, **Save**, and
+   **Send test**. From then on a student only types their approved university
+   email on the sign-up screen; CAVY emails them a username and a temporary
+   password, and they choose their own password (and their course, year,
+   division, batch and roll number) the first time they log in. Without it,
+   students use the normal sign-up form. Needs internet on the server PC.
+8. (Optional) In **AI assistant**, set a **class assistant**: pick a provider
    (OpenAI, Claude, Gemini, Grok, Groq or Ollama), paste a key, press **Check key**,
    choose a model, **Connect**. It is used to score sessions and for chat by
    students who haven't connected their own.

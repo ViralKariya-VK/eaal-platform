@@ -52,7 +52,7 @@ from eaal_platform.ai.provider import (
     ProviderHolder,
     Purpose,
 )
-from eaal_platform.auth import password_problem
+from eaal_platform.auth import hash_password, password_problem, verify_password
 from eaal_platform.db import academics, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
@@ -308,6 +308,7 @@ class CavyApi:
                 "role": "student",
                 "name": self._current_student_name,
                 "must_change_password": self._student_must_change_password(),
+                "needs_details": self._student_needs_details(),
             }
         if role == "professor":
             result = authenticate_professor(self._session_factory, email=email, password=password)
@@ -382,6 +383,57 @@ class CavyApi:
             else:
                 account = db_session.get(Professor, user_id)
             return bool(account and account.disabled)
+
+    def _student_needs_details(self) -> bool:
+        """True for a student who hasn't said which course they are in (while courses exist)."""
+        with self._session_factory() as db_session:
+            student = db_session.get(Student, self._require_student_id())
+            if student is None or student.course_id is not None:
+                return False
+        return bool(academics.list_courses(self._session_factory))
+
+    def get_signup_info(self) -> dict[str, Any]:
+        """Whether students get their first login by email (only on a configured server)."""
+        return {"email_signup": False}
+
+    def complete_first_login(
+        self, new_password: str, cohort: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """A student's first sign-in: choose a password and say where they study.
+
+        Only works while the temporary password from the email is still in use,
+        so it can't be used to change a password without knowing the old one.
+        """
+        student_id = self._require_student_id()
+        problem = password_problem(new_password)
+        if problem:
+            return {"ok": False, "error": problem}
+        with self._session_factory() as db_session:
+            student = db_session.get(Student, student_id)
+            if student is None or not student.must_change_password:
+                return {"ok": False, "error": "Use Profile to change your password."}
+            if student.password_hash and verify_password(new_password, student.password_hash):
+                return {"ok": False, "error": "Choose a password different from the temporary one."}
+        try:
+            place = academics.signup_cohort(self._session_factory, cohort)
+        except academics.AcademicError as exc:
+            return {"ok": False, "error": str(exc)}
+        with self._session_factory() as db_session:
+            student = db_session.get(Student, student_id)
+            assert student is not None
+            student.password_hash = hash_password(new_password)
+            student.must_change_password = False
+            if place:
+                student.course_id = place["course_id"]
+                student.year = place["year"]
+                student.division = place["division"]
+                student.batch = place["batch"]
+                student.roll_number = place["roll_number"]
+                student.enrollment_no = student.enrollment_no or place["roll_number"]
+            db_session.commit()
+        if place:
+            academics.assign_by_groups(self._session_factory, student_id)
+        return {"ok": True}
 
     def _student_must_change_password(self) -> bool:
         with self._session_factory() as db_session:

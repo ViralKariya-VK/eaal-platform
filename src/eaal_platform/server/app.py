@@ -36,11 +36,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform import mailer
 from eaal_platform.ai.provider import AIProvider, ProviderHolder
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.db import academics
 from eaal_platform.db.models import AuditLog
 from eaal_platform.events.logger import EventLogger
+from eaal_platform.server import onboarding
 
 API_VERSION = 1
 TOKEN_IDLE_SECONDS = 12 * 60 * 60
@@ -127,6 +129,9 @@ class ServerState:
         self._revoked: dict[str, str] = {}
         self._versions: dict[str, int] = {}
         self._changed = threading.Condition()
+        self.login_throttle = onboarding.Throttle()
+        self.send_mail = mailer.send_mail  # tests replace this so nothing is really sent
+        self.server_hint = ""  # a line telling students where to find the server, if known
 
     def new_api(self) -> CavyApi:
         return CavyApi(
@@ -262,6 +267,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class FirstLoginRequest(BaseModel):
+    email: str
+
+
 class CallRequest(BaseModel):
     args: list[Any] = []
 
@@ -299,6 +308,24 @@ def create_app(state: ServerState) -> FastAPI:
     def academic_options() -> list[dict[str, Any]]:
         """Courses with their years, divisions and batches (the sign-up form needs them)."""
         return academics.list_courses(state.session_factory)
+
+    @app.get("/api/signup_info")
+    def signup_info() -> dict[str, Any]:
+        """Whether students get their login by email (true once the Email page is set up)."""
+        return {"email_signup": mailer.load_settings(state.session_factory) is not None}
+
+    @app.post("/api/request_login")
+    def request_login(payload: FirstLoginRequest, http: Request) -> JSONResponse:
+        """A student's first sign-in: email them a temporary password (no token needed)."""
+        computer = http.client.host if http.client else "?"
+        try:
+            result = onboarding.request_first_login(
+                state, payload.email, computer, sender=lambda *a: state.send_mail(*a)
+            )
+        except onboarding.LoginRequestError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        state.bump(TOPIC_ACCOUNTS)
+        return JSONResponse({"result": result})
 
     def _who(client: _Client) -> str:
         return f"{client.role}:{client.name}"

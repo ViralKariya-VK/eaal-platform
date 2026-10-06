@@ -46,6 +46,7 @@ def test_every_table_has_synced_at_column(db_engine: Engine) -> None:
             "admins",
             "audit_log",
             "allowed_emails",
+            "email_settings",
             "courses",
             "course_options",
             "professor_courses",
