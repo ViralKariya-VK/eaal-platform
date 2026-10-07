@@ -102,6 +102,7 @@ from eaal_platform.db.models import (
 from eaal_platform.db.models import Session as SessionModel
 from eaal_platform.db.progress import is_stage_unlocked, stage_status
 from eaal_platform.events.logger import EventLogger, PendingEvent
+from eaal_platform.logging_setup import get_logger
 from eaal_platform.progress_report import SessionRow, build_progress
 from eaal_platform.sandbox.executor import run_code as sandbox_run_code
 from eaal_platform.signals.compute import compute_all_signals, persist_signal_scores
@@ -174,6 +175,7 @@ def _bundle_files(files: dict[str, str]) -> str:
 
 
 _SUBMIT_NOTES = {"focus": "Submitted automatically: left the lab window twice"}
+log = get_logger(__name__)
 _FOCUS_LIMIT = 2  # leaving the lab window this many times ends the lab
 
 
@@ -428,7 +430,8 @@ class CavyApi:
             return {"ok": False, "error": str(exc)}
         with self._session_factory() as db_session:
             student = db_session.get(Student, student_id)
-            assert student is not None
+            if student is None:
+                return {"ok": False, "error": "That account no longer exists."}
             student.password_hash = hash_password(new_password)
             student.must_change_password = False
             if place:
@@ -1483,63 +1486,68 @@ class CavyApi:
         snapshot_id = self._save_snapshot(session_id, files)
         with self._session_factory() as db_session:
             session = db_session.get(SessionModel, session_id)
-            now = datetime.now(UTC)
             earlier: list[tuple[int, int | None]] = []
             if session is not None:
+                now = datetime.now(UTC)
                 session.submitted_at = now
                 if reason == "focus" and self._focus_losses(db_session, session) >= _FOCUS_LIMIT:
                     session.submit_reason = "focus"
+                    log.warning("lab submitted automatically", extra={"session": session_id})
                 if session.stage is not None:
-                    forced = session.submit_reason == "focus"
-                    for stage in session.task.stages:
-                        if stage.id == session.stage_id:
-                            continue
-                        # A normal submit comes from the last stage and sweeps up the earlier
-                        # ones. A forced one ends the whole lab, so it covers every stage.
-                        if not forced and stage.order_index >= session.stage.order_index:
-                            continue
-                        open_attempt = (
-                            db_session.query(SessionModel)
-                            .filter(
-                                SessionModel.student_id == session.student_id,
-                                SessionModel.stage_id == stage.id,
-                                SessionModel.submitted_at.is_(None),
-                            )
-                            .order_by(SessionModel.id.desc())
-                            .first()
-                        )
-                        if open_attempt is None:
-                            never_opened = (
-                                forced
-                                and db_session.query(SessionModel)
-                                .filter_by(student_id=session.student_id, stage_id=stage.id)
-                                .first()
-                                is None
-                            )
-                            if not never_opened:
-                                continue
-                            open_attempt = SessionModel(
-                                student_id=session.student_id,
-                                task_id=session.task_id,
-                                stage_id=stage.id,
-                                started_at=now,
-                            )
-                            db_session.add(open_attempt)
-                            db_session.flush()
-                        open_attempt.submitted_at = now
-                        open_attempt.submit_reason = session.submit_reason
-                        last = (
-                            db_session.query(CodeSnapshot)
-                            .filter_by(session_id=open_attempt.id)
-                            .order_by(CodeSnapshot.id.desc())
-                            .first()
-                        )
-                        earlier.append((open_attempt.id, last.id if last else None))
+                    earlier = self._submit_other_stages(db_session, session, now)
             db_session.commit()
         for earlier_id, earlier_snapshot in earlier:
             self._log_event(earlier_id, EventType.SUBMISSION, code_version_id=earlier_snapshot)
         self._log_event(session_id, EventType.SUBMISSION, code_version_id=snapshot_id)
         return {"ok": True}
+
+    @staticmethod
+    def _submit_other_stages(
+        db_session: OrmSession, session: SessionModel, now: datetime
+    ) -> list[tuple[int, int | None]]:
+        """Submit the lab's other stages along with this one.
+
+        A normal submit comes from the last stage and sweeps up the earlier ones. A
+        forced one (the student left the window twice) ends the whole lab, so it covers
+        every stage, and a stage that was never opened is submitted empty.
+        Returns ``(session id, last snapshot id)`` for each one touched.
+        """
+        forced = session.submit_reason == "focus"
+        swept: list[tuple[int, int | None]] = []
+        for stage in session.task.stages:
+            if stage.id == session.stage_id:
+                continue
+            if not forced and stage.order_index >= session.stage.order_index:  # type: ignore[union-attr]
+                continue
+            attempts = db_session.query(SessionModel).filter(
+                SessionModel.student_id == session.student_id, SessionModel.stage_id == stage.id
+            )
+            open_attempt = (
+                attempts.filter(SessionModel.submitted_at.is_(None))
+                .order_by(SessionModel.id.desc())
+                .first()
+            )
+            if open_attempt is None:
+                if not forced or attempts.first() is not None:
+                    continue
+                open_attempt = SessionModel(
+                    student_id=session.student_id,
+                    task_id=session.task_id,
+                    stage_id=stage.id,
+                    started_at=now,
+                )
+                db_session.add(open_attempt)
+                db_session.flush()
+            open_attempt.submitted_at = now
+            open_attempt.submit_reason = session.submit_reason
+            last = (
+                db_session.query(CodeSnapshot)
+                .filter_by(session_id=open_attempt.id)
+                .order_by(CodeSnapshot.id.desc())
+                .first()
+            )
+            swept.append((open_attempt.id, last.id if last else None))
+        return swept
 
     # -- keeping the student in the lab ---------------------------------------
 
@@ -1573,6 +1581,10 @@ class CavyApi:
             session.focus_losses = (session.focus_losses or 0) + 1
             db_session.commit()
             count = self._focus_losses(db_session, session)
+        log.info(
+            "lab window left",
+            extra={"session": session_id, "count": count, "limit": _FOCUS_LIMIT},
+        )
         self._log_event(session_id, EventType.FOCUS_LOST, payload={"count": count})
         return {
             "count": count,
@@ -1921,7 +1933,8 @@ class CavyApi:
                 else:
                     kind = "practice"
                 submitted = session.submitted_at
-                assert submitted is not None
+                if submitted is None:  # (the query above only returns submitted sessions)
+                    continue
                 # SQLite hands back naive datetimes; compare like with like.
                 elapsed = submitted.replace(tzinfo=None) - session.started_at.replace(tzinfo=None)
                 rows.append(

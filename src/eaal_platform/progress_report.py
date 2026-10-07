@@ -62,11 +62,8 @@ def _trend(scores: list[float]) -> dict[str, Any]:
     return {"direction": direction, "change": change}
 
 
-def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
-    """Summarise a student's submitted sessions for the dashboard."""
-    rows = sorted(rows, key=lambda r: r["submitted_at"])  # oldest first
-    scores = [_score(row["signals"]) for row in rows]
-    history = [
+def _history(rows: list[SessionRow], scores: list[float | None]) -> list[dict[str, Any]]:
+    return [
         {
             "session_id": row["session_id"],
             "title": row["title"],
@@ -79,8 +76,9 @@ def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
         }
         for row, score in zip(rows, scores, strict=True)
     ]
-    scored = [s for s in scores if s is not None]
 
+
+def _pillars(rows: list[SessionRow]) -> list[dict[str, Any]]:
     pillars = []
     for heading, keys in PILLAR_SIGNALS:
         per_session = [_score(row["signals"], keys) for row in rows]
@@ -94,7 +92,12 @@ def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
                 **_trend(series),
             }
         )
+    return pillars
 
+
+def _strengths_and_growth(
+    rows: list[SessionRow],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     signal_means: dict[str, float] = {}
     for _, keys in PILLAR_SIGNALS:
         for key in keys:
@@ -108,7 +111,15 @@ def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
     growth = [{"key": k, "score": v} for k, v in reversed(ranked) if k not in strength_keys][
         :_MAX_HIGHLIGHTS
     ]
+    return strengths, growth
 
+
+def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
+    """Summarise a student's submitted sessions for the dashboard."""
+    rows = sorted(rows, key=lambda r: r["submitted_at"])  # oldest first
+    scores = [_score(row["signals"]) for row in rows]
+    scored = [s for s in scores if s is not None]
+    strengths, growth = _strengths_and_growth(rows)
     minutes = [row["minutes"] for row in rows if row["minutes"] is not None]
     return {
         "totals": {
@@ -120,8 +131,8 @@ def build_progress(rows: list[SessionRow]) -> dict[str, Any]:
             "latest_score": scored[-1] if scored else None,
         },
         "overall": {"series": scored, **_trend(scored)},
-        "pillars": pillars,
+        "pillars": _pillars(rows),
         "strengths": strengths,
         "growth_areas": growth,
-        "history": list(reversed(history)),  # newest first for the table
+        "history": list(reversed(_history(rows, scores))),  # newest first for the table
     }

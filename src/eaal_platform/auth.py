@@ -21,7 +21,9 @@ _ALGORITHM = "sha256"
 
 MIN_PASSWORD_LENGTH = 8
 # No 0/O/1/l/I: a temporary password gets read aloud or copied by hand.
-_TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_TEMP_PASSWORD_ALPHABET = (  # nosec B105 - the characters a password is drawn from
+    "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+)
 
 
 def password_problem(password: str) -> str | None:

@@ -9,6 +9,7 @@ from pathlib import Path
 import uvicorn
 
 from eaal_platform.db.bootstrap import reset_admin_password
+from eaal_platform.logging_setup import configure_logging
 from eaal_platform.server.app import create_app
 from eaal_platform.server.host import build_state, lan_addresses, server_db_path
 
@@ -29,6 +30,7 @@ def reset_admin(db_path: Path, email: str | None) -> int:
 
 
 def main() -> int:
+    configure_logging()
     parser = argparse.ArgumentParser(description="CAVY central server")
     parser.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all)")  # nosec B104 - LAN server
     parser.add_argument("--port", type=int, default=8000)

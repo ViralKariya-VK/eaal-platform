@@ -25,6 +25,7 @@ from eaal_platform.db.engine import (
     init_db,
 )
 from eaal_platform.events.logger import EventLogger
+from eaal_platform.logging_setup import configure_logging
 from eaal_platform.server.app import ServerState, create_app
 
 DEFAULT_PORT = 8000
@@ -74,15 +75,16 @@ class ServerHost:
         return self._thread is not None and self._thread.is_alive() and self.port is not None
 
     def start(self, port: int = DEFAULT_PORT) -> None:
+        configure_logging()
         if self.running:
             return
         self.error = None
         state: ServerState = self._build_state()
         config = uvicorn.Config(
             create_app(state),
-            host="0.0.0.0",
+            host="0.0.0.0",  # nosec B104 - a classroom server must be reachable on the LAN
             port=port,
-            log_level="warning",  # nosec B104 - LAN
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         failure: list[BaseException] = []

@@ -238,6 +238,72 @@ def _validated_kind(raw: str) -> ResourceKind:
         raise ResourceError("Choose what kind of resource this is.") from None
 
 
+def _check_note(spec: ResourceInput) -> str:
+    body = (spec.body or "").strip()
+    if not body:
+        raise ResourceError("Write the instructions.")
+    if len(body) > MAX_NOTE_CHARS:
+        raise ResourceError("That text is too long. Attach it as a file instead.")
+    return body
+
+
+def _set_file_details(resource: Resource, spec: ResourceInput, creating: bool) -> None:
+    """Check an uploaded file and note its name, type and size on the resource."""
+    if spec.data is None:
+        if creating:
+            raise ResourceError("Choose a file to upload.")
+        return
+    name = clean_filename(spec.filename or "")
+    if name.rsplit(".", 1)[-1].lower() in BLOCKED_EXTENSIONS and "." in name:
+        raise ResourceError(
+            "That type of file can't be shared, because opening it could run a program."
+        )
+    if len(spec.data) == 0:
+        raise ResourceError("That file is empty.")
+    if len(spec.data) > MAX_FILE_BYTES:
+        raise ResourceError(
+            f"That file is too large. The limit is {MAX_FILE_BYTES // (1024 * 1024)} MB."
+        )
+    resource.filename = name
+    resource.mime_type = (spec.mime_type or "application/octet-stream")[:150]
+    resource.size_bytes = len(spec.data)
+
+
+def _store_file_bytes(db: OrmSession, resource: Resource, data: bytes) -> None:
+    stored = db.query(ResourceFile).filter_by(resource_id=resource.id).first()
+    if stored is None:
+        db.add(ResourceFile(resource_id=resource.id, data=data))
+    else:
+        stored.data = data
+
+
+def _set_audience(
+    db: OrmSession, resource: Resource, professor_id: int, spec: ResourceInput
+) -> None:
+    """Whole class, or the chosen students (who must all be in this professor's class)."""
+    for share in db.query(ResourceStudent).filter_by(resource_id=resource.id):
+        db.delete(share)
+    if spec.audience_all:
+        return
+    chosen = list(dict.fromkeys(spec.student_ids or []))
+    if not chosen:
+        raise ResourceError("Choose at least one student, or share with your whole class.")
+    for student_id in chosen:
+        if db.get(Student, student_id) is None or not is_member(db, student_id, professor_id):
+            raise ResourceError("You can only share with students in your own class.")
+        db.add(ResourceStudent(resource_id=resource.id, student_id=student_id))
+
+
+def _set_labs(db: OrmSession, resource: Resource, spec: ResourceInput) -> None:
+    for link in db.query(ResourceLab).filter_by(resource_id=resource.id):
+        db.delete(link)
+    for task_id in dict.fromkeys(spec.task_ids or []):
+        task = db.get(Task, task_id)
+        if task is None or task.assessment_kind is not None or not task.stages:
+            raise ResourceError("You can only attach a resource to a lab.")
+        db.add(ResourceLab(resource_id=resource.id, task_id=task_id))
+
+
 def _apply(
     db: OrmSession,
     resource: Resource,
@@ -258,69 +324,21 @@ def _apply(
     resource.kind = kind
     resource.title = title
     resource.description = (spec.description or "").strip() or None
-
     if kind is ResourceKind.LINK:
         resource.url = _check_url(spec.url or "")
     elif kind is ResourceKind.NOTE:
-        body = (spec.body or "").strip()
-        if not body:
-            raise ResourceError("Write the instructions.")
-        if len(body) > MAX_NOTE_CHARS:
-            raise ResourceError("That text is too long. Attach it as a file instead.")
-        resource.body = body
-    else:  # FILE
-        if spec.data is None and creating:
-            raise ResourceError("Choose a file to upload.")
-        if spec.data is not None:
-            name = clean_filename(spec.filename or "")
-            if name.rsplit(".", 1)[-1].lower() in BLOCKED_EXTENSIONS and "." in name:
-                raise ResourceError(
-                    "That type of file can't be shared, because opening it could run a program."
-                )
-            if len(spec.data) == 0:
-                raise ResourceError("That file is empty.")
-            if len(spec.data) > MAX_FILE_BYTES:
-                raise ResourceError(
-                    f"That file is too large. The limit is {MAX_FILE_BYTES // (1024 * 1024)} MB."
-                )
-            resource.filename = name
-            resource.mime_type = (spec.mime_type or "application/octet-stream")[:150]
-            resource.size_bytes = len(spec.data)
+        resource.body = _check_note(spec)
+    else:
+        _set_file_details(resource, spec, creating)
 
     resource.audience_all = spec.audience_all
     if creating:
         db.add(resource)
         db.flush()
-
-    # File bytes
     if kind is ResourceKind.FILE and spec.data is not None:
-        stored = db.query(ResourceFile).filter_by(resource_id=resource.id).first()
-        if stored is None:
-            db.add(ResourceFile(resource_id=resource.id, data=spec.data))
-        else:
-            stored.data = spec.data
-
-    # Audience: only students from this professor's own class.
-    for share in db.query(ResourceStudent).filter_by(resource_id=resource.id):
-        db.delete(share)
-    if not spec.audience_all:
-        chosen = list(dict.fromkeys(spec.student_ids or []))
-        if not chosen:
-            raise ResourceError("Choose at least one student, or share with your whole class.")
-        for student_id in chosen:
-            student = db.get(Student, student_id)
-            if student is None or not is_member(db, student_id, professor_id):
-                raise ResourceError("You can only share with students in your own class.")
-            db.add(ResourceStudent(resource_id=resource.id, student_id=student_id))
-
-    # Labs
-    for link in db.query(ResourceLab).filter_by(resource_id=resource.id):
-        db.delete(link)
-    for task_id in dict.fromkeys(spec.task_ids or []):
-        task = db.get(Task, task_id)
-        if task is None or task.assessment_kind is not None or not task.stages:
-            raise ResourceError("You can only attach a resource to a lab.")
-        db.add(ResourceLab(resource_id=resource.id, task_id=task_id))
+        _store_file_bytes(db, resource, spec.data)
+    _set_audience(db, resource, professor_id, spec)
+    _set_labs(db, resource, spec)
 
 
 def create_resource(

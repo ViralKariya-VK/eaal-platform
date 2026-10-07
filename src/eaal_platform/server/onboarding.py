@@ -26,6 +26,9 @@ from eaal_platform.db.bootstrap import (
     reset_student_password,
 )
 from eaal_platform.db.models import Professor, Student
+from eaal_platform.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 MIN_SECONDS_BETWEEN_EMAILS = 60
 MAX_PER_ADDRESS_PER_HOUR = 5
@@ -75,17 +78,9 @@ def _body(name: str, email: str, password: str, server_hint: str) -> str:
     )
 
 
-def request_first_login(
-    state: Any,
-    email: str,
-    computer: str,
-    *,
-    sender: Callable[..., None] = mailer.send_mail,
-    throttle: Throttle | None = None,
-) -> dict[str, Any]:
-    """Create (or reset, if never used) the student's account and email the login details."""
+def _check_request(state: Any, email: str, computer: str, throttle: Throttle | None) -> Any:
+    """The mail settings and the approval for this email, or a reason the request can't go on."""
     factory = state.session_factory
-    email = normalise_email(email)
     if "@" not in email or len(email) > 320:
         raise LoginRequestError("Enter your university email address.")
     settings = mailer.load_settings(factory)
@@ -97,29 +92,22 @@ def request_first_login(
             "That email isn't on the approved list. Check the spelling, or ask your administrator."
         )
     (throttle or state.login_throttle).check(email, computer)
+    return settings, approval
 
+
+def _student_with_temporary_password(
+    factory: Any, email: str, approval: dict[str, Any]
+) -> tuple[int, str, bool]:
+    """Create the student (or give a never-used account a fresh password).
+
+    Returns ``(student id, temporary password, whether the account is new)``.
+    """
     with factory() as db:
         student = db.query(Student).filter(Student.email == email).first()
         if student is None and db.query(Professor).filter(Professor.email == email).first():
             raise LoginRequestError("That email belongs to a teacher account.")
         existing = (student.id, student.must_change_password, student.disabled) if student else None
-    created = False
-    if existing is None:
-        password = generate_temporary_password(10)
-        student_id = create_student_account(
-            factory,
-            display_name=approval["name"] or email.split("@")[0],
-            email=email,
-            password=password,
-            enrollment_no=approval["enrollment_no"],
-        )
-        with factory() as db:
-            row = db.get(Student, student_id)
-            assert row is not None
-            row.must_change_password = True
-            db.commit()
-        created = True
-    else:
+    if existing is not None:
         student_id, must_change, disabled = existing
         if disabled:
             raise LoginRequestError("This account is disabled. Ask your administrator.")
@@ -128,8 +116,44 @@ def request_first_login(
                 "This account is already set up. Log in with your password; if you forgot "
                 "it, ask your teacher or administrator to reset it."
             )
-        password = reset_student_password(factory, student_id)  # never used: send a fresh one
+        return student_id, reset_student_password(factory, student_id), False  # never used
+    password = generate_temporary_password(10)
+    student_id = create_student_account(
+        factory,
+        display_name=approval["name"] or email.split("@")[0],
+        email=email,
+        password=password,
+        enrollment_no=approval["enrollment_no"],
+    )
+    with factory() as db:
+        row = db.get(Student, student_id)
+        if row is not None:
+            row.must_change_password = True
+            db.commit()
+    return student_id, password, True
 
+
+def _forget_new_account(factory: Any, student_id: int) -> None:
+    with factory() as db:
+        row = db.get(Student, student_id)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+
+
+def request_first_login(
+    state: Any,
+    email: str,
+    computer: str,
+    *,
+    sender: Callable[..., None] = mailer.send_mail,
+    throttle: Throttle | None = None,
+) -> dict[str, Any]:
+    """Create (or reset, if never used) the student's account and email the login details."""
+    factory = state.session_factory
+    email = normalise_email(email)
+    settings, approval = _check_request(state, email, computer, throttle)
+    student_id, password, created = _student_with_temporary_password(factory, email, approval)
     name = approval["name"] or email.split("@")[0]
     try:
         sender(
@@ -139,12 +163,9 @@ def request_first_login(
             _body(name, email, password, getattr(state, "server_hint", "")),
         )
     except mailer.MailError as exc:
+        log.error("first-login email failed", extra={"account_created": created})
         if created:
-            with factory() as db:
-                row = db.get(Student, student_id)
-                if row is not None:
-                    db.delete(row)
-                    db.commit()
+            _forget_new_account(factory, student_id)
         raise LoginRequestError(
             "The email couldn't be sent. Tell your administrator (they can check the "
             "Email page in the admin panel)."
@@ -268,7 +289,8 @@ def confirm_password_reset(state: Any, email: str, code: str, new_password: str)
     role, user_id = account[0], account[1]
     with state.session_factory() as db:
         row = db.get(Student if role == "student" else Professor, user_id)
-        assert row is not None
+        if row is None:
+            raise LoginRequestError("That account no longer exists.")
         row.password_hash = hash_password(new_password)
         row.must_change_password = False
         db.commit()

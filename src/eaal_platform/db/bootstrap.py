@@ -527,7 +527,7 @@ def reset_admin_password(
             first = Admin(
                 display_name="Administrator",
                 email=DEFAULT_ADMIN_EMAIL,
-                password_hash="",
+                password_hash="",  # nosec B106 - replaced with the generated one just below
             )
             db_session.add(first)
             admins = [first]

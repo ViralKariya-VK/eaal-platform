@@ -4,6 +4,7 @@ append-only nature of the events table."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
@@ -268,3 +269,60 @@ def test_session_submitted_at_defaults_to_none_and_can_be_set(db_session: OrmSes
     fetched = db_session.get(Session, session.id)
     assert fetched is not None
     assert fetched.submitted_at is not None
+
+
+def test_the_connection_pool_is_big_enough_for_a_class(tmp_path: Path) -> None:
+    """A request can hold several connections at once; 30+ students used to stall for 30 s."""
+    from eaal_platform.db.engine import create_db_engine
+
+    engine = create_db_engine(tmp_path / "pool.db")
+    pool = engine.pool
+    assert pool.size() >= 50  # type: ignore[attr-defined]
+    assert pool._max_overflow >= 100  # type: ignore[attr-defined]
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
+        assert connection.exec_driver_sql("PRAGMA synchronous").scalar() == 1  # NORMAL
+    engine.dispose()
+
+
+def test_forty_students_at_once_are_not_kept_waiting(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    from eaal_platform.api.bridge import CavyApi
+    from eaal_platform.db.bootstrap import create_student_account, seed_demo_content
+    from eaal_platform.db.engine import create_db_engine, create_session_factory, init_db
+    from eaal_platform.events.logger import EventLogger
+
+    engine = create_db_engine(tmp_path / "busy.db")
+    init_db(engine)
+    factory = create_session_factory(engine)
+    seed_demo_content(factory)
+    logger = EventLogger(factory)
+    logger.start()
+    apis = []
+    for i in range(40):
+        create_student_account(
+            factory, display_name=f"S{i}", email=f"s{i}@x.com", password="hunter2-hunter2"
+        )
+        api = CavyApi(factory, logger)
+        api.login("student", f"s{i}@x.com", "hunter2-hunter2")
+        apis.append(api)
+
+    slowest: list[float] = []
+
+    def work(api: CavyApi) -> None:
+        start = time.perf_counter()
+        lab = api.get_labs()[0]["id"]
+        for stage in api.get_stages(lab)["stages"]:
+            api.start_stage(stage["id"])
+        slowest.append(time.perf_counter() - start)
+
+    threads = [threading.Thread(target=work, args=(api,)) for api in apis]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    logger.stop()
+    engine.dispose()
+    assert len(slowest) == 40 and max(slowest) < 10  # before the fix: 30 s timeouts

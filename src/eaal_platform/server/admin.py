@@ -1404,7 +1404,8 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
             destination = sqlite3.connect(target)
             try:
                 raw = source.driver_connection
-                assert isinstance(raw, sqlite3.Connection)
+                if not isinstance(raw, sqlite3.Connection):
+                    raise HTTPException(status_code=500, detail="Backups need a SQLite database.")
                 raw.backup(destination)
             finally:
                 destination.close()

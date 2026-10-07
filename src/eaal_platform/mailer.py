@@ -19,6 +19,9 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.db.models import EmailSettings
+from eaal_platform.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 DEFAULT_HOST = "smtp.gmail.com"
 DEFAULT_PORT = 587
@@ -58,7 +61,7 @@ def describe(session_factory: sessionmaker[OrmSession]) -> dict[str, Any]:
                 "port": DEFAULT_PORT,
                 "username": "",
                 "from_name": "CAVY Team",
-                "has_password": False,
+                "has_password": False,  # nosec B105 - a flag, not a password
                 "configured": False,
             }
         return {
@@ -142,6 +145,7 @@ def send_mail(
             smtp.login(settings.username, settings.password)
             smtp.send_message(message)
     except smtplib.SMTPAuthenticationError as exc:
+        log.warning("mail login refused", extra={"host": settings.host, "user": settings.username})
         raise MailError(
             "The mail server refused the address or app password. For Gmail, use an "
             "app password (Google Account > Security > App passwords), not the normal one."
@@ -149,4 +153,5 @@ def send_mail(
     except smtplib.SMTPRecipientsRefused as exc:
         raise MailError(f"The mail server refused the recipient {to}.") from exc
     except (smtplib.SMTPException, OSError) as exc:
+        log.warning("mail could not be sent", extra={"host": settings.host, "error": repr(exc)})
         raise MailError(f"Couldn't send the email ({exc.__class__.__name__}: {exc}).") from exc

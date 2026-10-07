@@ -82,14 +82,14 @@ def _xlsx_rows(data: bytes) -> list[list[str]]:
         raise UploadError("That Excel file couldn't be read. Is it a valid .xlsx file?") from exc
 
 
-def read_rows(filename: str, data: bytes, role: str) -> list[dict[str, Any]]:
-    """Parse an uploaded file into ``[{row, name, email, enrollment_no}, ...]``."""
+def _grid_from_file(filename: str, data: bytes) -> list[list[str]]:
+    """The file as rows of text cells (CSV or Excel), with empty rows dropped."""
     if len(data) > MAX_UPLOAD_BYTES:
         raise UploadError("That file is too large (the limit is 5 MB).")
     if not data:
         raise UploadError("That file is empty.")
     lower = filename.lower()
-    if lower.endswith(".xlsx") or lower.endswith(".xlsm"):
+    if lower.endswith((".xlsx", ".xlsm")):
         grid = _xlsx_rows(data)
     elif lower.endswith(".xls"):
         raise UploadError("Old .xls files aren't supported. Save it as .xlsx or .csv.")
@@ -97,44 +97,65 @@ def read_rows(filename: str, data: bytes, role: str) -> list[dict[str, Any]]:
         grid = _csv_rows(data)
     else:
         raise UploadError("Upload a .csv or .xlsx file.")
-
     grid = [row for row in grid if any(cell for cell in row)]
     if not grid:
         raise UploadError("That file has no rows.")
+    return grid
 
+
+def _cell(cells: list[str], column: int | None) -> str:
+    return cells[column] if column is not None and column < len(cells) else ""
+
+
+def _find(header: list[str], names: Any) -> int | None:
+    return next((i for i, h in enumerate(header) if h in names), None)
+
+
+def _layout(grid: list[list[str]], role: str) -> tuple[list[list[str]], int, dict[str, int | None]]:
+    """Work out where the columns are: ``(data rows, number of the first one, columns)``."""
     header = [cell.lower().strip() for cell in grid[0]]
-    has_header = any(cell in _EMAIL for cell in header)
-    if has_header:
-        body, first_number = grid[1:], 2
-        name_col = next((i for i, h in enumerate(header) if h in _NAME), None)
-        email_col = next(i for i, h in enumerate(header) if h in _EMAIL)
-        enr_col = next((i for i, h in enumerate(header) if h in _ENROLLMENT), None)
-    elif any("@" in cell for cell in grid[0]):
+    if any(cell in _EMAIL for cell in header):
+        columns = {
+            "name": _find(header, _NAME),
+            "email": _find(header, _EMAIL),
+            "enrollment": _find(header, _ENROLLMENT),
+        }
+        return grid[1:], 2, columns
+    if any("@" in cell for cell in grid[0]):
         # No header row: find the email in each row; the other cells are name, then enrolment.
-        body, first_number = grid, 1
-        name_col = enr_col = None
-        email_col = -1
-    else:
-        raise UploadError(
-            "Couldn't find an Email column. The first row must name the columns "
-            "(name, email" + (", enrollment_no" if role == "student" else "") + "). "
-            "Download the template to see the layout."
+        return grid, 1, {"name": None, "email": None, "enrollment": None}
+    raise UploadError(
+        "Couldn't find an Email column. The first row must name the columns "
+        "(name, email" + (", enrollment_no" if role == "student" else "") + "). "
+        "Download the template to see the layout."
+    )
+
+
+def _person(cells: list[str], columns: dict[str, int | None]) -> tuple[str, str, str]:
+    """``(name, email, enrollment)`` from one row."""
+    if columns["email"] is not None:
+        return (
+            _cell(cells, columns["name"]),
+            _cell(cells, columns["email"]),
+            _cell(cells, columns["enrollment"]),
         )
+    at = next((i for i, c in enumerate(cells) if "@" in c), None)
+    others = [c for i, c in enumerate(cells) if i != at and c]
+    return (
+        others[0] if others else "",
+        cells[at] if at is not None else "",
+        others[1] if len(others) > 1 else "",
+    )
+
+
+def read_rows(filename: str, data: bytes, role: str) -> list[dict[str, Any]]:
+    """Parse an uploaded file into ``[{row, name, email, enrollment_no}, ...]``."""
+    body, first_number, columns = _layout(_grid_from_file(filename, data), role)
     if len(body) > MAX_ROWS:
         raise UploadError(f"That file has more than {MAX_ROWS} rows. Split it into smaller files.")
-
     rows: list[dict[str, Any]] = []
     for offset, cells in enumerate(body):
-        if email_col >= 0:
-            email = cells[email_col] if email_col < len(cells) else ""
-            name = cells[name_col] if name_col is not None and name_col < len(cells) else ""
-            enrollment = cells[enr_col] if enr_col is not None and enr_col < len(cells) else ""
-        else:
-            at = next((i for i, c in enumerate(cells) if "@" in c), None)
-            email = cells[at] if at is not None else ""
-            others = [c for i, c in enumerate(cells) if i != at and c]
-            name = others[0] if others else ""
-            enrollment = others[1] if len(others) > 1 else ""
+        name, email, enrollment = _person(cells, columns)
         rows.append(
             {
                 "row": first_number + offset,

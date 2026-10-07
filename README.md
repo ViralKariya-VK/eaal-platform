@@ -11,51 +11,45 @@ learning processes — the platform's whole purpose is to distinguish those.
 
 ## Status
 
-The full local workflow is in place: Labs -> Stages (Learning ->
-Exploration -> Assessment, each with its own AI-assistance mode) ->
-Workspace -> Submit -> CIQ Score panel, plus a standalone Practice mode.
-Chat is wired to a real local Ollama model with the student's current code
-and last error as context.
+CAVY is a working classroom platform for Windows and macOS:
 
-The signal-computation engine (`src/eaal_platform/signals/compute.py`)
-computes all fourteen EAAL signals from the event log — behavioral
-signals (S1.3–S1.5, S2.1–S2.4) via deterministic event analysis, code
-adoption/modification (S1.3, S1.4, S2.3) by diffing AI-suggested code
-against what the student kept, S1.6 (Adaptive AI Use) longitudinally
-against the student's prior sessions, S3.2 by the final run's correctness,
-S1.1/S1.2/S3.1 via structured low-temperature LLM rubric scoring against
-the configured `AIProvider`, and S3.3/S3.4 by gating on a professor-authored
-follow-on Transfer Task or Retention Check (the latter also requires a real
-measured delay since the original session — see `db/models.py`'s
-`AssessmentKind`). A signal still returns `None` with a stated reason
-rather than a faked value whenever its specific evidence doesn't exist for
-a given session (e.g. S3.3/S3.4 on an ordinary Lab session, or S1.5 before
-a second AI interaction) — see `validation/` for the suite that checks
-every signal's formula, gating logic, and (for the three LLM-rubric
-signals) reliability/face-validity against the real configured model.
+- **Labs.** A professor creates a lab (three stages: Learning, Exploration, Assessment, each with
+  its own AI-assistance mode), aims it at a course, year, division and batch, and attaches
+  resources. A student works through the stages in one coding screen (Back/Next between them),
+  and submits the whole lab once. Practice mode is separate and ungraded.
+- **CIQ.** From the full event log of how a student codes and uses the AI, the engine in
+  `signals/compute.py` computes the 14 EAAL signals (deterministic ones, code-adoption diffs, and
+  three LLM-rubric ones), shown to the student as a progress dashboard and to the professor per
+  student and per class.
+- **One central server** (`python -m eaal_platform.server`, or "Host a server" inside the app) so a
+  professor and many students on one network share the same data live, plus a browser **admin
+  panel** at `/admin` (users, courses, approved emails, labs, resources, database browser, audit
+  log, backup, email, AI assistant).
+- **People and classes.** Only approved emails can sign up; teachers are created by the
+  administrator. Courses (with level, department, years and an ID code) are set by the administrator;
+  students pick theirs, professors pick the courses they teach, and every student of a course joins
+  the class of each professor who teaches it. Students get their first login by email, and forgotten
+  passwords are reset with an emailed code.
+- **AI.** Students connect their own key (OpenAI, Claude, Gemini, Grok or Groq), kept only on their
+  computer; the class assistant is set by the administrator or professor.
+- **Lab mode.** While a lab is open the window is full screen, switching apps is blocked where the
+  operating system allows it, leaving the window twice submits the lab, and pasted text is recorded
+  (and checked against what the AI wrote).
+- **Installers** for macOS (`.dmg`) and Windows (`.exe`), built and checked on GitHub.
 
-The app now has real local accounts and a Login screen with separate
-Student and Teacher tabs (`auth.py` hashes passwords with
-`hashlib.pbkdf2_hmac`; `Student` and `Professor` are deliberately separate
-tables — see their docstrings in `db/models.py`). Logging in as a
-professor reaches a distinct Professor Dashboard: a `Create New Session`
-form that authors a real Lab (a `Task` with three `Stage`s, replacing
-hand-edited demo content) and a `View Report` per lab showing submission
-status and a provisional overall score per student.
-
-Not yet built: encryption (HTTPS) and offline queuing for the server mode. A central server now exists — see [docs/DEMO_SETUP.md](docs/DEMO_SETUP.md) — so the old note below applies only to standalone mode: a server or cross-device sync — every account and every
-lab is local to the machine it was created on. This is deliberately
-local-first for now — every table already carries a `synced_at` column so
-a central-sync phase can be added later without a schema rewrite. Because
-of this, the Professor Dashboard's reports only ever show students who
-used *this* device; a real classroom rollout needs that sync phase first.
+What it is not yet: encrypted (HTTPS) traffic, offline queuing when the server is unreachable, code
+signing of the installers, or a validated CIQ weighting (the overall number is a provisional
+equal-weight average). See [docs/ROADMAP.md](docs/ROADMAP.md) and
+[docs/DEMO_SETUP.md](docs/DEMO_SETUP.md) (including the honest limits).
 
 ## Project layout
 
 ```
 README.md          you are here
 pyproject.toml     dependencies and tool settings
-docs/              guides: DEMO_SETUP.md (classroom setup), WINDOWS_TESTING.md, ROADMAP.md
+docs/              guides: DEMO_SETUP.md (classroom setup), PERFORMANCE.md (measured speed),
+                   WINDOWS_TESTING.md, ROADMAP.md
+requirements.lock  the exact package versions the project is tested with
 scripts/           everything you run by hand: launchers and installer builders (see scripts/README.md)
 src/eaal_platform/ the application
     api/ client/ server/ db/ ai/ signals/ sandbox/ events/ web/ assets/
@@ -136,6 +130,23 @@ packaging (`py2app`/`pyinstaller` on macOS, `PyInstaller`/`briefcase` on
 Windows), which a release would need to also bundle the interpreter and
 dependencies so a recipient doesn't need Python installed at all.
 
+## Reproducible install
+
+`requirements.lock` pins every package (150 of them) to the versions the tests run against:
+
+```bash
+python -m pip install -r requirements.lock
+python -m pip install -e . --no-deps
+```
+
+`pip-audit` finds no known vulnerabilities in that list.
+
+## Logging and speed
+
+The app and server write structured logs (one JSON object per line) to `logs/cavy.log` in the
+CAVY data folder, rotated at 1 MB. `python scripts/benchmark.py` simulates a class working at
+once; the latest numbers are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
 ## Quality gate
 
 ```bash
@@ -169,19 +180,21 @@ methods, which take and return plain JSON.
 
 ```
 src/eaal_platform/
-  auth.py    password hashing for local Student/Professor accounts
-  db/        SQLAlchemy models, engine/WAL setup, account creation +
-             demo-seeding, the stage-unlock rule
-  events/    background/batched append-only event logger
-  sandbox/   subprocess code execution with timeouts + resource limits
-  ai/        AIProvider interface, the Ollama adapter, prompt assembly
-  signals/   the EAAL signal-computation engine (see Status above)
-  api/       CavyApi — the JS/Python bridge; this is "the app" now
-  web/       index.html + style.css + app.js — the entire frontend,
-             a small hand-rolled router with no build step. A Login
-             screen (Student/Teacher tabs) gates everything else; the
-             sidebar and available screens differ by role from there.
-  app.py     wires it all together and opens the window
+  auth.py          password hashing, temporary passwords
+  logging_setup.py structured (JSON-lines) logging to a rotating file
+  mailer.py        sending email (SMTP) for first logins and reset codes
+  db/              SQLAlchemy models, engine/WAL setup, accounts, courses (academics.py),
+                   resources, approvals, the stage-unlock rule
+  events/          background/batched append-only event logger
+  sandbox/         subprocess code execution with timeouts + resource limits
+  ai/              AIProvider interface; Ollama and the hosted providers (OpenAI, Claude,
+                   Gemini, Grok, Groq); prompt assembly
+  signals/         the EAAL signal-computation engine
+  api/             CavyApi: the JS/Python bridge; "the app" (every operation lives here)
+  client/          the app's side: talks to the local data or a server, lab-mode lock-down
+  server/          the central FastAPI server, onboarding, and the admin panel (admin_ui/)
+  web/             index.html + style.css + app.js: the whole frontend (no build step)
+  app.py           wires it all together and opens the window
 ```
 
 `db/`, `events/`, `sandbox/`, and `ai/` are UI-agnostic and were carried

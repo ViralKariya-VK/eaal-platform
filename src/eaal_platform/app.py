@@ -19,6 +19,7 @@ from eaal_platform.client.api import build_client_api
 from eaal_platform.db.bootstrap import seed_demo_content
 from eaal_platform.db.engine import create_db_engine, create_session_factory, init_db
 from eaal_platform.events.logger import EventLogger
+from eaal_platform.logging_setup import configure_logging
 
 _INDEX_HTML = Path(__file__).resolve().parent / "web" / "index.html"
 _ICON_PATH = Path(__file__).resolve().parent / "assets" / "icon.png"
@@ -68,6 +69,7 @@ def _ask_where_to_save(suggested_name: str) -> str | None:
 
 
 def main() -> int:
+    configure_logging()
     engine = create_db_engine()
     init_db(engine)
     session_factory = create_session_factory(engine)

@@ -60,6 +60,7 @@ def _enable_wal(dbapi_connection: object, _connection_record: object) -> None:
     cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, and a lot fewer disk waits
     cursor.close()
 
 
@@ -71,7 +72,18 @@ def create_db_engine(db_path: Path | None = None) -> Engine:
     """
     path = db_path if db_path is not None else default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{path}", future=True)
+    # A classroom server answers dozens of students at once and a request can hold more than
+    # one connection (a query that calls another). The default pool of 15 ran dry with ~30
+    # students, and every waiting request then stalled for 30 s, so the pool is much larger
+    # (SQLite connections are cheap) and a writer waits for the file lock instead of failing.
+    engine = create_engine(
+        f"sqlite:///{path}",
+        future=True,
+        pool_size=50,
+        max_overflow=150,
+        pool_timeout=60,
+        connect_args={"timeout": 30},
+    )
     event.listen(engine, "connect", _enable_wal)
     return engine
 

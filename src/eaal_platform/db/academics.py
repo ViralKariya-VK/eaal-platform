@@ -398,6 +398,41 @@ def courses_for_professor(
 # -- a student's (or a lab's) place in a course ---------------------------------------------
 
 
+def _course_from(db: OrmSession, raw: dict[str, Any]) -> Course:
+    try:
+        course = db.get(Course, int(raw.get("course_id")))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        course = None
+    if course is None:
+        raise AcademicError("Choose a course.")
+    return course
+
+
+def _year_from(course: Course, raw: dict[str, Any], *, student: bool) -> int | None:
+    if raw.get("year") in (None, "", 0):
+        if student:
+            raise AcademicError("Choose your year.")
+        return None
+    try:
+        year = int(raw["year"])
+    except (TypeError, ValueError):
+        raise AcademicError("Choose a year.") from None
+    if not 1 <= year <= course.years:
+        raise AcademicError(f"{course.name} has {course.years} years.")
+    return year
+
+
+def _option_from(course: Course, raw: dict[str, Any], kind: str, *, student: bool) -> str | None:
+    """A division or batch: it must be on the course's list, and a student must give one."""
+    allowed = {o.name for o in course.options if o.kind == kind}
+    chosen = _clean(raw.get(kind))
+    if chosen is not None and chosen not in allowed:
+        raise AcademicError(f"Choose a {kind} from the list.")
+    if student and allowed and chosen is None:
+        raise AcademicError(f"Choose your {kind}.")
+    return chosen
+
+
 def _resolve(db: OrmSession, raw: dict[str, Any] | None, *, student: bool) -> dict[str, Any]:
     """Check a place (course, year, division, batch; and the roll number for a student).
 
@@ -405,34 +440,10 @@ def _resolve(db: OrmSession, raw: dict[str, Any] | None, *, student: bool) -> di
     needs the course; the rest narrow it down and may be left as "any".
     """
     raw = raw or {}
-    try:
-        course = db.get(Course, int(raw.get("course_id")))  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        course = None
-    if course is None:
-        raise AcademicError("Choose a course.")
-
-    year: int | None = None
-    if raw.get("year") not in (None, "", 0):
-        try:
-            year = int(raw["year"])
-        except (TypeError, ValueError):
-            raise AcademicError("Choose a year.") from None
-        if not 1 <= year <= course.years:
-            raise AcademicError(f"{course.name} has {course.years} years.")
-    elif student:
-        raise AcademicError("Choose your year.")
-
-    values: dict[str, str | None] = {}
-    for kind in KINDS:
-        allowed = {o.name for o in course.options if o.kind == kind}
-        chosen = _clean(raw.get(kind))
-        if chosen is not None and chosen not in allowed:
-            raise AcademicError(f"Choose a {kind} from the list.")
-        if student and allowed and chosen is None:
-            raise AcademicError(f"Choose your {kind}.")
-        values[kind] = chosen
-
+    course = _course_from(db, raw)
+    year = _year_from(course, raw, student=student)
+    division = _option_from(course, raw, "division", student=student)
+    batch = _option_from(course, raw, "batch", student=student)
     roll = _clean(raw.get("roll_number"))
     if student and roll is None:
         raise AcademicError("Enter your roll number.")
@@ -440,8 +451,8 @@ def _resolve(db: OrmSession, raw: dict[str, Any] | None, *, student: bool) -> di
         "course_id": course.id,
         "course_name": course_label(course),
         "year": year,
-        "division": values["division"],
-        "batch": values["batch"],
+        "division": division,
+        "batch": batch,
         "roll_number": roll,
     }
 

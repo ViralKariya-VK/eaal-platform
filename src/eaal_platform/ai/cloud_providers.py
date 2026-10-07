@@ -63,33 +63,41 @@ class ProviderError(Exception):
     """A failure worded for the person using the app."""
 
 
+def _error_detail(response: httpx.Response) -> str:
+    """The one-line reason a provider gave for an error reply, if it gave one."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict):
+        detail = str(error.get("message") or "")
+    elif isinstance(error, str):
+        detail = error
+    else:
+        return ""
+    return detail.strip().splitlines()[0][:200] if detail.strip() else ""
+
+
 def explain_http_error(label: str, response: httpx.Response) -> str:
     """Turn an error reply into one sentence saying what to do about it."""
     status = response.status_code
-    detail = ""
-    try:
-        body = response.json()
-        error = body.get("error") if isinstance(body, dict) else None
-        if isinstance(error, dict):
-            detail = str(error.get("message") or "")
-        elif isinstance(error, str):
-            detail = error
-    except ValueError:
-        pass
-    detail = detail.strip().splitlines()[0][:200] if detail.strip() else ""
+    detail = _error_detail(response)
     key_problem = any(
         w in detail.lower() for w in ("api key", "api_key", "apikey", "authentication")
     )
     if status in (401, 403) or (status == 400 and key_problem):
         # Gemini and Grok report a bad key as a 400 with the reason in the text.
         return f"{label} rejected the API key. Check that you copied it completely."
-    if status == 404:
-        return f"{label} doesn't recognise that model. Choose another one."
-    if status == 429:
-        return (
+    fixed = {
+        404: f"{label} doesn't recognise that model. Choose another one.",
+        429: (
             f"{label} says this key is rate-limited or out of credit. "
             "Check your plan, or wait a moment."
-        )
+        ),
+    }
+    if status in fixed:
+        return fixed[status]
     if status == 400 and detail:
         return f"{label} refused the request: {detail}"
     if status >= 500:

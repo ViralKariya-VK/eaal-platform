@@ -42,7 +42,10 @@ from eaal_platform.api.bridge import CavyApi
 from eaal_platform.db import academics
 from eaal_platform.db.models import AuditLog
 from eaal_platform.events.logger import EventLogger
+from eaal_platform.logging_setup import get_logger
 from eaal_platform.server import onboarding
+
+log = get_logger(__name__)
 
 API_VERSION = 1
 TOKEN_IDLE_SECONDS = 12 * 60 * 60
@@ -249,12 +252,15 @@ class ServerState:
 
     def audit(self, actor: str, action: str, detail: str | None = None, address: str = "") -> None:
         """Append one line to the audit log (never raises: logging mustn't break a request)."""
+        log.info(
+            "audit", extra={"actor": actor, "action": action, "detail": detail, "from": address}
+        )
         try:
             with self.session_factory() as db:
                 db.add(AuditLog(actor=actor, action=action, detail=detail, address=address))
                 db.commit()
-        except Exception:  # nosec B110 - audit failures must not block the action itself
-            pass
+        except Exception:  # audit failures must not block the action itself
+            log.exception("could not write the audit log")
 
     def _expire_locked(self) -> None:
         cutoff = self._clock() - TOKEN_IDLE_SECONDS
@@ -437,6 +443,9 @@ def create_app(state: ServerState) -> FastAPI:
             result = getattr(client.api, method)(*payload.args)
         except (ValueError, TypeError, PermissionError) as exc:
             return JSONResponse({"error": str(exc), "type": type(exc).__name__}, status_code=400)
+        except Exception:
+            log.exception("unexpected error in a call", extra={"method": method})
+            return JSONResponse({"error": "The server hit a problem."}, status_code=500)
         topics = _METHOD_TOPICS.get(method)
         if topics:
             # Listeners react instantly and may score the work, so the event
