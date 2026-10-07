@@ -520,3 +520,11 @@ td:has(.row-actions) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.switch-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}

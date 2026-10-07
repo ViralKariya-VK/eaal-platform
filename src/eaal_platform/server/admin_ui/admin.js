@@ -234,7 +234,8 @@ function ago(seconds) {
 
 function showOverview(quiet) {
   return guarded(async () => {
-    const [data, live] = await Promise.all([get("/overview"), get("/live")]);
+    const [data, live, labState] = await Promise.all([get("/overview"), get("/live"), get("/lab-mode")]);
+    const labOn = labState.enabled;
     const c = data.counts;
     const a = live.accounts;
     const tile = (label, value, hint = "") =>
@@ -242,7 +243,7 @@ function showOverview(quiet) {
     const ai = data.ai;
     main().innerHTML = `
       <div class="page-head"><div><h1>Overview</h1><p class="muted">Live: updates itself every few seconds.</p></div>
-        <button id="refresh">Refresh now</button></div>
+        <div class="row-actions" style="align-items:center"><label class="switch-line" title="Full screen, blocked app switching and the leave-the-window rule while students take a lab"><input type="checkbox" id="labModeToggle" style="width:auto" ${labOn ? "checked" : ""} /> Lab mode</label><button id="refresh">Refresh now</button></div></div>
       <div class="tiles">
         ${tile("Accounts", a.students + a.professors, `${a.students} students · ${a.professors} professors`)}
         ${tile("Signed in now", a.signed_in)}
@@ -308,6 +309,15 @@ function showOverview(quiet) {
         </div>
       </div>`;
     document.getElementById("refresh").addEventListener("click", () => showOverview());
+    document.getElementById("labModeToggle").addEventListener("change", async (e) => {
+      try {
+        await post("/lab-mode", { enabled: e.target.checked });
+        toast(e.target.checked ? "Lab mode is on for new labs." : "Lab mode is off: labs open normally.");
+      } catch (err) {
+        toast(err.message);
+        e.target.checked = !e.target.checked;
+      }
+    });
     main().querySelectorAll("[data-session]").forEach((b) =>
       b.addEventListener("click", () => showSession(Number(b.dataset.session)))
     );

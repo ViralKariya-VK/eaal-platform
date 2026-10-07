@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
@@ -62,7 +64,7 @@ class _Keys:
 
 def test_the_lab_lock_goes_full_screen_and_comes_back() -> None:
     window, keys = _Window(), _Keys()
-    lock = LabLock(window=lambda: window, key_lock=keys, enabled=True)
+    lock = LabLock(window=lambda: window, key_lock=keys, enabled=True, keys_delay=0.0)
     assert lock.engage() == {"fullscreen": True, "keys_blocked": True}
     assert lock.engage()["fullscreen"] is True  # stage to stage: no second toggle
     assert window.toggles == 1 and keys.on
@@ -72,8 +74,58 @@ def test_the_lab_lock_goes_full_screen_and_comes_back() -> None:
     assert window.toggles == 2
 
 
+def _lock(
+    window: _Window, keys: _Keys, delay: float = 0.0
+) -> tuple[LabLock, list[Any], list[float]]:
+    """A lab lock whose timers run at once and whose keyboard hand-backs are recorded."""
+    handed_back: list[Any] = []
+    waits: list[float] = []
+
+    def now(seconds: float, work: Any) -> None:
+        waits.append(seconds)
+        work()
+
+    lock = LabLock(
+        window=lambda: window,
+        key_lock=keys,
+        enabled=True,
+        schedule=now,
+        refocus=handed_back.append,
+        keys_delay=delay,
+    )
+    return lock, handed_back, waits
+
+
+def test_the_keyboard_is_handed_back_to_the_page_after_full_screen() -> None:
+    window, keys = _Window(), _Keys()
+    lock, handed_back, _ = _lock(window, keys)
+    lock.engage()
+    assert handed_back and all(w is window for w in handed_back)  # typing must still work
+    before = len(handed_back)
+    lock.refocus()  # and again whenever the person clicks
+    assert len(handed_back) == before + 1
+    lock.release()
+    assert len(handed_back) > before + 1  # and when full screen ends
+    lock.refocus()  # nothing happens outside a lab
+    assert handed_back[-1] is window
+
+
+def test_the_mac_kiosk_waits_for_full_screen_to_finish() -> None:
+    window, keys = _Window(), _Keys()
+    lock, _, waits = _lock(window, keys, delay=1.5)
+    assert lock.engage()["fullscreen"] is True
+    assert window.toggles == 1 and keys.on  # (the timer ran at once here)
+    assert 1.5 in waits  # the key lock was asked for after a pause, not together with full screen
+    lock2, _, _ = _lock(_Window(), _Keys())
+    lock2.engage()
+    lock2.release()
+    assert not lock2.engaged
+
+
 def test_the_lab_lock_copes_with_no_window_or_keys() -> None:
-    assert LabLock(window=lambda: None, key_lock=_Keys(False), enabled=True).engage() == {
+    assert LabLock(
+        window=lambda: None, key_lock=_Keys(False), enabled=True, keys_delay=0.0
+    ).engage() == {
         "fullscreen": False,
         "keys_blocked": False,
     }
@@ -205,3 +257,50 @@ def test_pastes_are_logged_with_their_source(db_session_factory: Factory) -> Non
     logger.stop()
     with pytest.raises(ValueError):
         api.record_paste(999, "x")
+
+
+# -- the administrator's switch -------------------------------------------------------------
+
+
+def test_lab_mode_can_be_switched_off_for_the_class(db_session_factory: Factory) -> None:
+    from eaal_platform.db import app_settings
+
+    api, logger, ids = _lab(db_session_factory)
+    assert api.get_lab_policy() == {"lab_mode": True}
+    lock = LabLock(window=lambda: _Window(), key_lock=_Keys(), enabled=True, keys_delay=0.0)
+    app = ClientApi(api, lab_lock=lock)
+
+    app_settings.set_flag(db_session_factory, app_settings.LAB_MODE, False)
+    assert api.get_lab_policy() == {"lab_mode": False}
+    assert app.enter_lab_mode() == {
+        "ok": True,
+        "fullscreen": False,
+        "keys_blocked": False,
+        "disabled": True,
+    }
+    assert not lock.engaged  # nothing was locked
+    assert api.record_focus_lost(ids[0])["action"] == "none"  # and leaving the window is free
+
+    app_settings.set_flag(db_session_factory, app_settings.LAB_MODE, True)
+    assert app.enter_lab_mode()["fullscreen"] is True and lock.engaged
+    assert api.record_focus_lost(ids[0])["action"] == "warn"
+    logger.stop()
+
+
+def test_the_admin_panel_has_a_lab_mode_switch(db_session_factory: Factory, db_engine: Any) -> None:
+    from fastapi.testclient import TestClient
+
+    from eaal_platform.server.app import ServerState, create_app
+
+    state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
+    with TestClient(create_app(state)) as http:
+        token = http.post(
+            "/admin/api/setup", json={"name": "R", "email": "r@x.com", "password": _PW}
+        ).json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        assert http.get("/admin/api/lab-mode", headers=auth).json() == {"enabled": True}
+        assert http.post("/admin/api/lab-mode", json={"enabled": False}, headers=auth).json() == {
+            "enabled": False
+        }
+        assert http.get("/admin/api/lab-mode", headers=auth).json() == {"enabled": False}
+        assert http.get("/admin/api/lab-mode").status_code == 401

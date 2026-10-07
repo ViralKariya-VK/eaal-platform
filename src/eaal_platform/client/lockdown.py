@@ -114,6 +114,45 @@ if sys.platform == "win32":
             ("dwExtraInfo", ctypes.c_size_t),
         )
 
+    _user32_cache: Any = None
+
+    def _user32() -> Any:
+        """One shared ``user32`` with every function's argument types set (64-bit pointers)."""
+        global _user32_cache
+        if _user32_cache is None:
+            lib = ctypes.WinDLL("user32", use_last_error=True)
+            lib.SetWindowsHookExW.argtypes = (
+                ctypes.c_int,
+                _HOOKPROC,
+                wintypes.HINSTANCE,
+                wintypes.DWORD,
+            )
+            lib.SetWindowsHookExW.restype = ctypes.c_void_p
+            lib.CallNextHookEx.argtypes = (
+                ctypes.c_void_p,
+                ctypes.c_int,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            )
+            lib.CallNextHookEx.restype = ctypes.c_ssize_t
+            lib.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
+            lib.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+            lib.GetAsyncKeyState.restype = ctypes.c_short
+            lib.GetMessageW.argtypes = (
+                ctypes.POINTER(wintypes.MSG),
+                wintypes.HWND,
+                wintypes.UINT,
+                wintypes.UINT,
+            )
+            lib.PostThreadMessageW.argtypes = (
+                wintypes.DWORD,
+                wintypes.UINT,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            )
+            _user32_cache = lib
+        return _user32_cache
+
     class _WindowsKeyLock:
         """Runs the keyboard hook on its own thread (a hook needs a message loop)."""
 
@@ -124,37 +163,27 @@ if sys.platform == "win32":
             self._installed = False
 
         def _callback(self, code: int, w_param: int, l_param: int) -> int:
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            if code >= 0 and w_param in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
-                key = ctypes.cast(l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
-                ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-                shift = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
-                if should_block(key.vkCode, key.flags, ctrl, shift):
-                    return 1
-            return int(user32.CallNextHookEx(None, code, w_param, l_param))
+            # A hook sits in front of every key press on the computer, so this must never
+            # raise or hold anything up: whatever goes wrong, the key is let through.
+            lib = _user32()
+            try:
+                if code >= 0 and w_param in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
+                    key = ctypes.cast(l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
+                    ctrl = bool(lib.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+                    shift = bool(lib.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+                    if should_block(key.vkCode, key.flags, ctrl, shift):
+                        return 1
+            except Exception:  # nosec B110 - see above
+                pass
+            return int(lib.CallNextHookEx(None, code, w_param, l_param))
 
         def _run(self) -> None:
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            lib = _user32()
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            user32.SetWindowsHookExW.argtypes = (
-                ctypes.c_int,
-                _HOOKPROC,
-                wintypes.HINSTANCE,
-                wintypes.DWORD,
-            )
-            user32.SetWindowsHookExW.restype = ctypes.c_void_p
-            user32.CallNextHookEx.argtypes = (
-                ctypes.c_void_p,
-                ctypes.c_int,
-                wintypes.WPARAM,
-                wintypes.LPARAM,
-            )
-            user32.CallNextHookEx.restype = ctypes.c_ssize_t
-            user32.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
             kernel32.GetModuleHandleW.restype = wintypes.HMODULE
             self._thread_id = kernel32.GetCurrentThreadId()
             procedure = _HOOKPROC(self._callback)  # must stay referenced while hooked
-            hook = user32.SetWindowsHookExW(
+            hook = lib.SetWindowsHookExW(
                 _WH_KEYBOARD_LL, procedure, kernel32.GetModuleHandleW(None), 0
             )
             self._installed = bool(hook)
@@ -162,10 +191,10 @@ if sys.platform == "win32":
             if not hook:
                 return
             message = wintypes.MSG()
-            while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-                user32.TranslateMessage(ctypes.byref(message))
-                user32.DispatchMessageW(ctypes.byref(message))
-            user32.UnhookWindowsHookEx(hook)
+            while lib.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+                lib.TranslateMessage(ctypes.byref(message))
+                lib.DispatchMessageW(ctypes.byref(message))
+            lib.UnhookWindowsHookEx(hook)
 
         def engage(self) -> bool:
             if self._thread is not None:
@@ -180,8 +209,7 @@ if sys.platform == "win32":
             thread, self._thread = self._thread, None
             if thread is None:
                 return
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            user32.PostThreadMessageW(self._thread_id, _WM_QUIT, 0, 0)
+            _user32().PostThreadMessageW(self._thread_id, _WM_QUIT, 0, 0)
             thread.join(2)
             self._installed = False
 
@@ -196,25 +224,88 @@ def platform_key_lock() -> KeyLock | None:
     return None
 
 
+def give_keyboard_to_web_view(window: Any) -> None:
+    """Hand the keyboard back to the page.
+
+    Going full screen changes the native window underneath the web view, and the
+    keyboard can be left with the window frame instead of the page, so keys do
+    nothing until this is done. Safe to call at any time; it never raises.
+    """
+    native = getattr(window, "native", None)
+    if native is None:
+        return
+    try:
+        if sys.platform == "win32":
+            from System import Action  # type: ignore[import-not-found]  # via pythonnet
+
+            def focus_windows() -> None:
+                native.Activate()
+                native.browser.webview.Focus()
+
+            native.Invoke(Action(focus_windows))
+        elif sys.platform == "darwin":
+            from AppKit import NSApplication
+            from PyObjCTools import AppHelper
+
+            def focus_mac() -> None:
+                NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                native.makeKeyAndOrderFront_(None)
+                view = native.contentView()
+                if view is not None:
+                    native.makeFirstResponder_(view)
+
+            AppHelper.callAfter(focus_mac)
+    except Exception:  # nosec B110 - best effort
+        pass
+
+
+def _later(seconds: float, work: Callable[[], None]) -> None:
+    timer = threading.Timer(seconds, work)
+    timer.daemon = True
+    timer.start()
+
+
 class LabLock:
     """Full screen plus the key lock, switched on and off as a pair."""
+
+    # After the window changes size the keyboard is handed back to the page a few times,
+    # because the change finishes at different moments on different computers.
+    _REFOCUS_AT = (0.3, 1.0, 2.5)
 
     def __init__(
         self,
         window: Callable[[], Any] | None = None,
         key_lock: KeyLock | None = None,
         enabled: bool | None = None,
+        schedule: Callable[[float, Callable[[], None]], None] | None = None,
+        refocus: Callable[[Any], None] | None = None,
+        keys_delay: float | None = None,
     ) -> None:
         self._window = window or _first_window
         self._keys = key_lock if key_lock is not None else platform_key_lock()
         self._enabled = enabled if enabled is not None else not os.environ.get("CAVY_NO_LOCKDOWN")
+        self._schedule = schedule or _later
+        self._refocus = refocus or give_keyboard_to_web_view
+        # On a Mac the kiosk options wait until the full-screen move has finished:
+        # asking for both at once can leave the window without the keyboard.
+        self._keys_delay = (
+            keys_delay if keys_delay is not None else (1.5 if sys.platform == "darwin" else 0.0)
+        )
         self._fullscreen = False
         self._engaged = False
+
+    def _give_keyboard_back(self) -> None:
+        for delay in self._REFOCUS_AT:
+            self._schedule(delay, lambda: self._refocus(self._window()))
+
+    def refocus(self) -> None:
+        """Called by the page when the person clicks: make sure keys reach it."""
+        if self._engaged:
+            self._refocus(self._window())
 
     def engage(self) -> dict[str, bool]:
         if not self._enabled:
             return {"fullscreen": False, "keys_blocked": False}
-        keys_blocked = self._keys.engage() if self._keys is not None else False
         if not self._fullscreen:
             window = self._window()
             if window is not None:
@@ -224,7 +315,20 @@ class LabLock:
                 except Exception:  # nosec B110 -- the focus check is the safety net
                     pass
         self._engaged = True
+        keys_blocked = False
+        if self._keys is not None:
+            if self._keys_delay > 0:
+                self._schedule(self._keys_delay, self._start_keys)
+                keys_blocked = True  # on its way
+            else:
+                keys_blocked = self._keys.engage()
+        self._give_keyboard_back()
         return {"fullscreen": self._fullscreen, "keys_blocked": keys_blocked}
+
+    def _start_keys(self) -> None:
+        if self._engaged and self._keys is not None:
+            self._keys.engage()
+            self._give_keyboard_back()
 
     def release(self) -> None:
         if not self._engaged:
@@ -238,6 +342,11 @@ class LabLock:
                 with contextlib.suppress(Exception):
                     window.toggle_fullscreen()
             self._fullscreen = False
+            self._give_keyboard_back_after_release()
+
+    def _give_keyboard_back_after_release(self) -> None:
+        for delay in self._REFOCUS_AT:
+            self._schedule(delay, lambda: self._refocus(self._window()))
 
     @property
     def engaged(self) -> bool:

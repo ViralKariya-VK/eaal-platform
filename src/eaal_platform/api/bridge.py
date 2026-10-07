@@ -52,7 +52,7 @@ from eaal_platform.ai.provider import (
     Purpose,
 )
 from eaal_platform.auth import hash_password, password_problem, verify_password
-from eaal_platform.db import academics, approvals
+from eaal_platform.db import academics, app_settings, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     authenticate_professor,
@@ -1553,6 +1553,10 @@ class CavyApi:
         )
         return int(total or 0)
 
+    def get_lab_policy(self) -> dict[str, Any]:
+        """Whether the administrator has lab mode (full screen, key lock, focus rule) on."""
+        return {"lab_mode": app_settings.get_flag(self._session_factory, app_settings.LAB_MODE)}
+
     def record_focus_lost(self, session_id: int) -> dict[str, Any]:
         """The lab window lost focus. The first time is a warning, the second ends the lab.
 
@@ -1560,6 +1564,8 @@ class CavyApi:
         a stage does not give the student their warning back.
         """
         self._require_session_owner(session_id)
+        if not app_settings.get_flag(self._session_factory, app_settings.LAB_MODE):
+            return {"count": 0, "limit": _FOCUS_LIMIT, "action": "none"}
         with self._session_factory() as db_session:
             session = db_session.get(SessionModel, session_id)
             if session is None or session.stage is None:

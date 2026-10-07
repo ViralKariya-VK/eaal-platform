@@ -51,6 +51,7 @@ def test_every_table_has_synced_at_column(db_engine: Engine) -> None:
             "course_options",
             "professor_courses",
             "class_members",
+            "app_settings",
             "professor_classes",
         )
         if table_name in server_only or table_name.startswith("resource"):

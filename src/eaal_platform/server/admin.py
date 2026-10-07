@@ -40,7 +40,7 @@ from eaal_platform import mailer
 from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
-from eaal_platform.db import academics, approval_import, approvals
+from eaal_platform.db import academics, app_settings, approval_import, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     create_professor_account,
@@ -215,6 +215,10 @@ class EmailSettingsRequest(BaseModel):
     username: str
     password: str | None = None  # blank keeps the saved one
     from_name: str = "CAVY Team"
+
+
+class LabModeRequest(BaseModel):
+    enabled: bool
 
 
 class EmailTestRequest(BaseModel):
@@ -644,6 +648,20 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         audit(admin, "delete_account", label)
         state.bump(TOPIC_ACCOUNTS)
         return {"ok": True}
+
+    # -- lab mode on/off ----------------------------------------------------------------
+
+    @router.get("/lab-mode")
+    def lab_mode(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        return {"enabled": app_settings.get_flag(state.session_factory, app_settings.LAB_MODE)}
+
+    @router.post("/lab-mode")
+    def set_lab_mode(
+        request: LabModeRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        app_settings.set_flag(state.session_factory, app_settings.LAB_MODE, request.enabled)
+        audit(admin, "lab_mode", "on" if request.enabled else "off")
+        return {"enabled": request.enabled}
 
     # -- email (login details for students' first sign-in) ----------------------------
 

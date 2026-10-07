@@ -51,6 +51,7 @@ _HANDLED_HERE = frozenset(
         "create_account",
         "enter_lab_mode",
         "leave_lab_mode",
+        "refocus_window",
         "get_ai_settings",
         "set_ai_provider",
         "send_ai_message",
@@ -306,8 +307,22 @@ class ClientApi:
         return result
 
     def enter_lab_mode(self) -> dict[str, Any]:
-        """A lab is starting: go full screen and block the ways of switching away."""
+        """A lab is starting: go full screen and block the ways of switching away.
+
+        Unless the administrator has switched lab mode off for the whole class.
+        """
+        try:
+            allowed = bool(self._backend.get_lab_policy().get("lab_mode", True))
+        except Exception:  # an older server doesn't know the question: lab mode stays on
+            allowed = True
+        if not allowed:
+            return {"ok": True, "fullscreen": False, "keys_blocked": False, "disabled": True}
         return {"ok": True, **self._lab_lock.engage()}
+
+    def refocus_window(self) -> dict[str, Any]:
+        """The page asks for the keyboard back (it is called when someone clicks in a lab)."""
+        self._lab_lock.refocus()
+        return {"ok": True}
 
     def leave_lab_mode(self) -> dict[str, Any]:
         self._lab_lock.release()

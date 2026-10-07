@@ -627,6 +627,15 @@ class ResourceStudent(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
 
 
+class AppSetting(Base):
+    """A server-wide switch an administrator can flip (for example, lab mode on or off)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+
+
 class EmailSettings(Base):
     """The mail account the server sends login emails from (one row).
 

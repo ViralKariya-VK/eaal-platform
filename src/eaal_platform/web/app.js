@@ -2991,7 +2991,13 @@ function startLabMode(info, getFiles) {
     stopLabMode();
     return;
   }
-  api().enter_lab_mode().catch(() => {});
+  // The administrator can switch lab mode off for the whole class: then nothing is locked.
+  api()
+    .enter_lab_mode()
+    .then((result) => {
+      if (result && result.disabled) stopLabMode();
+    })
+    .catch(() => {});
   if (labMode) {
     labMode.info = info;
     labMode.getFiles = getFiles;
@@ -3030,6 +3036,17 @@ function startLabMode(info, getFiles) {
     showFocusWarning();
   };
   state.onVisibility = () => (document.visibilityState === "hidden" ? state.onBlur() : state.onFocus());
+  // Clicking in the lab asks the app to hand the keyboard back to the page: after the window
+  // goes full screen the keys can otherwise end up with the window frame (typing does nothing).
+  state.lastRefocus = 0;
+  state.onPointer = () => {
+    const now = Date.now();
+    if (now - state.lastRefocus > 1500) {
+      state.lastRefocus = now;
+      api().refocus_window().catch(() => {});
+    }
+  };
+  document.addEventListener("mousedown", state.onPointer, true);
   window.addEventListener("blur", state.onBlur);
   window.addEventListener("focus", state.onFocus);
   document.addEventListener("visibilitychange", state.onVisibility);
@@ -3039,6 +3056,7 @@ function startLabMode(info, getFiles) {
 function stopLabMode() {
   if (!labMode) return;
   clearTimeout(labMode.timer);
+  document.removeEventListener("mousedown", labMode.onPointer, true);
   window.removeEventListener("blur", labMode.onBlur);
   window.removeEventListener("focus", labMode.onFocus);
   document.removeEventListener("visibilitychange", labMode.onVisibility);
