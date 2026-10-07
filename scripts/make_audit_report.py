@@ -482,55 +482,112 @@ def build(data: dict[str, Any], out: Path) -> None:
     story += [table(nfr, [24, 44, 112])]
     story += [PageBreak()]
 
-    story += [P("Against the course rubric", h1), rule()]
+    story += [P("5. Does the scoring measure what it claims?", h1), rule()]
     story += [
         P(
-            "How the evidence above lines up with each criterion of the Codebase and NFRs rubric "
-            "(10 marks each). The known gaps are listed here too, so the marks are not overstated."
+            "Generic tests show the code runs. They do not show that each of the fourteen EAAL "
+            "signals measures the behaviour it is defined to measure. A separate suite in "
+            "<font name='Courier'>validation/</font> answers that, using the real "
+            "<font name='Courier'>CavyApi</font> against a throwaway database, and the real local "
+            "model for the three signals that need a language model."
         ),
-        Spacer(1, 3 * mm),
+        Spacer(1, 2 * mm),
     ]
-    rub = [
-        ["Criterion", "Evidence", "Gaps we know about", "Marks"],
+    sv = [
+        ["Check", "Result", "What it means"],
         [
-            "Codebase &amp; architecture",
-            "Packages split by job (db, api, server, client, signals, ai, sandbox, events). "
-            "Event-sourced store. Fully pinned <font name='Courier'>requirements.lock</font> "
-            f"({data['pinned']} packages, pip-audit clean). README with install, layout, "
-            "architecture, logging; docs for demo setup, Windows builds, performance and roadmap.",
-            "<font name='Courier'>api/bridge.py</font> is one large class (next refactor).",
-            "9 / 10",
+            "Known-answer trials",
+            "53 / 53 exact",
+            "Each formula matches the value worked out by hand.",
         ],
         [
-            "Frameworks &amp; justification",
-            "Section 2: each framework tied to a project requirement, with the alternatives we "
-            "compared and why we did not pick them. Small dependency list, no unused packages.",
-            "Comparison is by reasoning and our own tests, not published benchmarks.",
-            "9 / 10",
+            "No-evidence trials",
+            "10 / 10 returned None",
+            "A signal with no evidence says so, never invents a number.",
         ],
         [
-            "Code quality &amp; dynamic testing",
-            f"Ruff {data['ruff']} issues; mypy strict {data['mypy']} errors. Radon average grade A "
-            f"({data['cc_avg']}), no block above {data['cc_max'][0]}. "
-            f"{data['tests_passed']} tests, {data['coverage']:.1f}% line+branch coverage (above 85%). "
-            f"mutmut on the scoring engine: {mut or 'configured'}, found and fixed weak assertions "
-            "(65% to 83%).",
-            f"{cc['C']} blocks at grade C; mutation testing covers the scoring engine only.",
-            "9 / 10",
+            "Repeatability",
+            "88 / 88 identical",
+            "Recomputing the same session five times gives the same output.",
         ],
         [
-            "NFRs achieved",
-            "Performance measured (30 and 100 students, 0 failures, a real pool bug found and "
-            "fixed). Security: Bandit clean, hashed passwords, signed tokens, secrets not in the "
-            "repo, input validation, lab keys held in memory. Reliability: structured JSON logging "
-            "with rotation, error handling that returns plain messages, autosaving work.",
-            "HTTP not HTTPS; installers unsigned; SMTP password stored as plain text in the "
-            "server database.",
-            "9 / 10",
+            "S1.1 help-seeking (model)",
+            "r = 0.866, p = .005",
+            "Rank agreement with hand-labelled examples.",
         ],
-        ["", "", "<b>Total</b>", "<b>36 / 40</b>"],
+        ["S1.2 grounding (model)", "r = 0.843, p = .009", "Same check."],
+        [
+            "S3.1 understanding (model)",
+            "r = 0.845, p = .034",
+            "Same check; ICC 0.68 is not significant.",
+        ],
     ]
-    story += [table(rub, [30, 80, 50, 20])]
+    story += [table(sv, [44, 40, 96]), Spacer(1, 3 * mm)]
+    story += [
+        P(
+            "<b>What this does not show.</b> It shows the signals are computed correctly and "
+            "repeatably. It does not show they predict real learning; that needs a study with "
+            "students. One model-scored case is known to be wrong: a line-by-line restatement of "
+            "the code was given full marks for understanding. Full write-up: "
+            "<font name='Courier'>validation/report/VALIDATION_REPORT.pdf</font>."
+        ),
+        PageBreak(),
+    ]
+
+    story += [P("6. Growth since the first audit", h1), rule()]
+    story += [
+        P(
+            "The first audit covered the single-user desktop app (3,188 lines, 21 files, 145 tests). "
+            "CAVY has since become a classroom system, and the checks above were run again on the "
+            "larger code."
+        ),
+        Spacer(1, 2 * mm),
+    ]
+    gr = [
+        ["", "First audit", "Now"],
+        ["Python source lines", "3,188", f"{data['py_loc']:,} in {data['py_files']} files"],
+        ["Tests", "144 passed", f"{data['tests_passed']} passed"],
+        ["Line + branch coverage", "90.3%", f"{data['coverage']:.1f}%"],
+        ["Mutation score (scoring engine)", "63.7% (647 of 1,016)", mut or "n/a"],
+        [
+            "Ruff / mypy strict / Bandit",
+            "0 / 0 / 0",
+            f"{data['ruff']} / {data['mypy']} / {b['high'] + b['medium'] + b['low']}",
+        ],
+        ["Dependencies", "3 declared", f"{data['pinned']} pinned and audited"],
+        [
+            "What it is",
+            "One desktop app per student",
+            "Class server, admin panel, professors, courses, lab mode, email",
+        ],
+    ]
+    story += [table(gr, [56, 54, 70]), Spacer(1, 4 * mm)]
+    story += [
+        P(
+            "New in this period: the central server and admin panel, courses with levels and "
+            "departments, professors and many-to-many classes, lab mode (full screen, key lock, "
+            "focus rule, paste detection), first-login and password-reset emails, Groq as a full "
+            "provider, structured logging, and a load benchmark. Each of these has tests, and the "
+            "performance bug the benchmark found is described in <font name='Courier'>docs/PERFORMANCE.md</font>."
+        ),
+        Spacer(1, 4 * mm),
+        P("7. Reproducing every number", h1),
+        rule(),
+        Spacer(1, 2 * mm),
+    ]
+    rp = [
+        ["Check", "Command"],
+        ["Install", "pip install -r requirements.lock && pip install -e ."],
+        ["Lint and types", "ruff check src tests ; mypy src"],
+        ["Complexity", "radon cc src/eaal_platform -a -s ; radon mi src/eaal_platform -s"],
+        ["Tests, coverage", "pytest --cov=eaal_platform --cov-branch"],
+        ["Security", "bandit -r src ; pip-audit -r requirements.lock"],
+        ["Mutation", "mutmut run   (scoped to signals/compute.py in pyproject.toml)"],
+        ["Performance", "python scripts/benchmark.py --students 30"],
+        ["Signal validation", "python validation/run_synthetic_suite.py"],
+        ["This report", "python scripts/make_audit_report.py"],
+    ]
+    story += [table(rp, [34, 146])]
 
     story += [PageBreak()]
 
@@ -576,7 +633,10 @@ def build(data: dict[str, Any], out: Path) -> None:
             "than the scoring engine; test lab mode on more computers."
         ),
         Spacer(1, 6 * mm),
-        P("Report prepared by Group 04.", small),
+        P(
+            "Report prepared by Group 04: Viral Kariya, Vanshika Ahuja, Yashika Parmar, Carol Anderia.",
+            small,
+        ),
     ]
 
     doc = SimpleDocTemplate(
