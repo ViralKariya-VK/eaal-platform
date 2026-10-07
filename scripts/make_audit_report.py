@@ -1,4 +1,4 @@
-"""Write docs/CAVY-Audit-Report.pdf: the codebase, frameworks, code-quality and NFR assessment.
+"""Write docs/Audit Report.pdf: the codebase, frameworks, code-quality and NFR assessment.
 
 Every number comes from running the tools against the current source tree when this script runs, so the
 report cannot drift from the code. Needs reportlab, ruff, mypy, radon, bandit, pip-audit and pytest-cov
@@ -1310,7 +1310,7 @@ def build(data: dict[str, Any], out: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--mutation", default=None, help='e.g. "killed=600 survived=120 timeout=3"')
-    parser.add_argument("--out", type=Path, default=ROOT / "docs" / "CAVY-Audit-Report.pdf")
+    parser.add_argument("--out", type=Path, default=ROOT / "docs" / "Audit Report.pdf")
     args = parser.parse_args()
     data = collect(args.mutation)
     build(data, args.out)
