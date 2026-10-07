@@ -15,7 +15,6 @@ import re
 import statistics
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -275,13 +274,6 @@ def _cover(c: Any, doc: Any, data: dict[str, Any]) -> None:
         c.circle(24 * mm, y - (22 + i * 8) * mm + 1.2 * mm, 1.1 * mm, stroke=0, fill=1)
         c.setFillColor(INK)
         c.drawString(29 * mm, y - (22 + i * 8) * mm, name)
-    c.setFillColor(MUTED)
-    c.setFont("Helvetica", 9)
-    c.drawString(
-        22 * mm,
-        20 * mm,
-        f"NMIMS  ·  Generated {date.today():%d %B %Y} from the current source tree",
-    )
     c.restoreState()
 
 
@@ -1206,12 +1198,12 @@ def build(data: dict[str, Any], out: Path) -> None:
     story += section("6", "Growth since the first audit", "Same checks, larger system")
     story += [
         P(
-            "The first audit covered the single-user desktop app (3,188 lines, 21 files, 145 tests). CAVY has since become a "
+            "The first audit was done on 20 September 2026 and covered the single-user desktop app (3,188 lines, 21 files, 145 tests). The current audit was done on 23 September 2026; in between, CAVY became a "
             "classroom system, and every check above was run again on the larger code.",
         ),
         table(
             [
-                ["", "First audit", "Now"],
+                ["", "First audit (20 Sep 2026)", "Current audit (23 Sep 2026)"],
                 ["Python source lines", "3,188", f"{data['py_loc']:,} in {data['py_files']} files"],
                 ["Tests", "144 passed", f"{data['tests_passed']} passed"],
                 ["Line + branch coverage", "90.3%", f"{data['coverage']:.1f}%"],
