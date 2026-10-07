@@ -132,7 +132,7 @@ dependencies so a recipient doesn't need Python installed at all.
 
 ## Reproducible install
 
-`requirements.lock` pins every package (150 of them) to the versions the tests run against:
+`requirements.lock` pins every package (151 of them) to the versions the tests run against:
 
 ```bash
 python -m pip install -r requirements.lock

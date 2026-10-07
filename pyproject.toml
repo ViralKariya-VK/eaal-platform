@@ -81,6 +81,7 @@ ignore = []
 # hand-written rubric-validation rationale) rather than code logic, so a
 # 100-column code limit doesn't serve its usual purpose here.
 "validation/generate_report.py" = ["E501", "RUF001"]
+"scripts/make_audit_report.py" = ["E501", "N802"]
 "validation/labeled_examples.py" = ["E501"]
 "validation/pilot_simulation.py" = ["E501"]
 "validation/advanced_statistics.py" = ["E501"]
