@@ -91,6 +91,7 @@ function formatTime(iso) {
 }
 
 function modal(html, onMount) {
+  const previous = document.activeElement;
   const overlay = document.createElement("div");
   overlay.className = "overlay";
   overlay.innerHTML = `<div class="modal">${html}</div>`;
@@ -98,7 +99,49 @@ function modal(html, onMount) {
     if (e.target === overlay) overlay.remove();
   });
   document.body.appendChild(overlay);
+
+  // Dialog semantics, focus moved in and kept in, Escape to cancel, focus handed back afterwards.
+  const card = overlay.querySelector(".modal");
+  const heading = card.querySelector("h1, h2, h3");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  if (heading) {
+    heading.id = heading.id || `modalTitle${Date.now()}`;
+    card.setAttribute("aria-labelledby", heading.id);
+  }
+  const focusable = () =>
+    [...card.querySelectorAll('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select, textarea, a[href]')].filter(
+      (el) => el.offsetParent !== null
+    );
+  overlay.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      const cancel = [...card.querySelectorAll("button")].find((b) => /^(cancel|close|done)/i.test(b.textContent.trim()));
+      if (cancel) cancel.click();
+      else overlay.remove();
+    } else if (e.key === "Tab") {
+      const items = focusable();
+      if (!items.length) return;
+      const at = items.indexOf(document.activeElement);
+      if (e.shiftKey && at <= 0) {
+        e.preventDefault();
+        items[items.length - 1].focus();
+      } else if (!e.shiftKey && (at === items.length - 1 || at === -1)) {
+        e.preventDefault();
+        items[0].focus();
+      }
+    }
+  });
+  const gone = new MutationObserver(() => {
+    if (document.body.contains(overlay)) return;
+    gone.disconnect();
+    if (previous && document.body.contains(previous)) previous.focus();
+  });
+  gone.observe(document.body, { childList: true });
+
   if (onMount) onMount(overlay);
+  const first = card.querySelector('input:not([type="hidden"]), select, textarea') || card.querySelector("button.primary") || focusable()[0];
+  if (first) first.focus();
   return overlay;
 }
 
@@ -117,12 +160,12 @@ async function showAuth() {
   try {
     needsSetup = (await get("/status")).needs_setup;
   } catch (err) {
-    app.innerHTML = `<div class="auth card"><h2>CAVY Admin</h2><p class="error">${esc(err.message)}</p></div>`;
+    app.innerHTML = `<div class="auth card"><h1>CAVY Admin</h1><p class="error">${esc(err.message)}</p></div>`;
     return;
   }
   app.innerHTML = `
     <div class="auth card">
-      <h2>CAVY Admin</h2>
+      <h1>CAVY Admin</h1>
       <p class="muted">${needsSetup ? "First time here: create the administrator account." : "Sign in to manage this server."}</p>
       ${needsSetup ? `<label>Your name <input id="aName" autocomplete="name" /></label>` : ""}
       <label>Email <input id="aEmail" type="text" autocomplete="username" /></label>
@@ -390,7 +433,7 @@ function showApproved(quiet) {
         <span style="flex:1"></span>
         <button id="dlTemplate">Download template</button>
         <button id="importBtn">Import CSV / Excel</button>
-        <input type="file" id="importFile" accept=".csv,.xlsx,.xlsm,.txt,.tsv" hidden />
+        <input type="file" id="importFile" aria-label="Spreadsheet to import" accept=".csv,.xlsx,.xlsm,.txt,.tsv" hidden />
         <button class="primary" id="addOne">Add one</button>
       </div>
       <div class="card">${table(
@@ -568,129 +611,6 @@ function showUsers(quiet) {
             });
           }
         );
-      })
-    );
-    main().querySelectorAll("[data-edit]").forEach((b) =>
-      b.addEventListener("click", () => approvedForm(byId[b.dataset.edit]))
-    );
-    main().querySelectorAll("[data-remove]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const e = byId[b.dataset.remove];
-        confirmBox(
-          `Remove ${e.email}?`,
-          e.registered
-            ? "They have already registered, and their account stays as it is. If you delete their account later they will not be able to sign up again unless you add them back."
-            : "They will no longer be able to create an account with this email.",
-          "Remove",
-          async () => { await post(`/allowed/${e.id}/delete`); toast("Removed."); showApproved(); }
-        );
-      })
-    );
-  });
-}
-
-function approvedForm(existing) {
-  const isStudent = approvedRole === "student";
-  modal(
-    `<h3>${existing ? "Edit" : "Add"} ${isStudent ? "student" : "teacher"} email</h3>
-     <label>Name (optional) <input id="aeName" value="${esc(existing?.name || "")}" /></label>
-     <label>Email <input id="aeEmail" value="${esc(existing?.email || "")}" placeholder="name@university.edu" /></label>
-     ${isStudent ? `<label>Enrolment number (optional) <input id="aeEnrol" value="${esc(existing?.enrollment_no || "")}" /></label>` : ""}
-     <p class="error" id="aeError"></p>
-     <div class="actions"><button id="aeCancel">Cancel</button><button class="primary" id="aeSave">${existing ? "Save" : "Add"}</button></div>`,
-    (o) => {
-      o.querySelector("#aeCancel").addEventListener("click", () => o.remove());
-      const save = async () => {
-        const body = {
-          name: o.querySelector("#aeName").value.trim(),
-          email: o.querySelector("#aeEmail").value.trim(),
-          enrollment_no: isStudent ? o.querySelector("#aeEnrol").value.trim() : null,
-        };
-        try {
-          if (existing) await post(`/allowed/${existing.id}/update`, body);
-          else await post("/allowed", { role: approvedRole, ...body });
-          o.remove();
-          toast(existing ? "Saved." : "Added.");
-          showApproved();
-        } catch (err) {
-          o.querySelector("#aeError").textContent = err.message;
-        }
-      };
-      o.querySelector("#aeSave").addEventListener("click", save);
-      o.querySelector("#aeEmail").addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
-    }
-  );
-}
-
-function showImportReport(filename, report) {
-  const problems = report.problems.length
-    ? `<h3 style="margin-top:14px">Rows that were not added (${report.problems.length})</h3>
-       ${table(["Row", "Email", "Why"], report.problems.map((p) => [p.row ?? "", esc(p.email), esc(p.error)]))}`
-    : "";
-  modal(
-    `<h3>Import finished</h3>
-     <p class="muted">${esc(filename)} · ${report.rows} row${report.rows === 1 ? "" : "s"} read</p>
-     <div class="tiles" style="margin:10px 0">
-       <div class="card tile"><div class="num">${report.added}</div><div class="muted">added</div></div>
-       <div class="card tile"><div class="num">${report.already_listed}</div><div class="muted">already on the list</div></div>
-       <div class="card tile"><div class="num">${report.problems.length}</div><div class="muted">not added</div></div>
-     </div>${problems}
-     <div class="actions"><button class="primary" id="irDone">Done</button></div>`,
-    (o) => o.querySelector("#irDone").addEventListener("click", () => { o.remove(); showApproved(); })
-  );
-}
-
-// -- users --------------------------------------------------------------------
-
-function showUsers(quiet) {
-  return guarded(async () => {
-    const data = await get("/users");
-    const status = (u) =>
-      (u.online ? '<span class="pill ok">online</span> ' : "") +
-      (u.disabled ? '<span class="pill bad">disabled</span> ' : "") +
-      (u.must_change_password ? '<span class="pill warn">must change password</span>' : "");
-    const teacherCell = (u) => {
-      const names = (u.professor_ids || []).map((id) => (data.professors.find((p) => p.id === id) || {}).name).filter(Boolean);
-      return `${names.length ? esc(names.join(", ")) : '<span class="muted">none</span>'} <button class="link" data-teachers="${u.id}">Change</button>`;
-    };
-    const row = (role) => (u) => [
-      u.id,
-      esc(u.name),
-      esc(u.email),
-      role === "student" ? placeText(u) : `${u.students} students · ${u.resources} shared`,
-      role === "student" ? teacherCell(u) : esc((u.courses || []).join(", ") || "No courses"),
-      role === "student" ? u.sessions : "",
-      status(u),
-      `<div class="row-actions"><button data-edit="${role}:${u.id}">Edit</button> <button data-reset="${role}:${u.id}" data-name="${esc(u.name)}">Reset password</button>
-       <button data-toggle="${role}:${u.id}" data-disabled="${u.disabled}" data-name="${esc(u.name)}">${u.disabled ? "Enable" : "Disable"}</button>
-       <button class="danger" data-delete="${role}:${u.id}" data-name="${esc(u.name)}">Delete</button></div>`,
-    ];
-    const byKey = {};
-    data.students.forEach((u) => (byKey[`student:${u.id}`] = u));
-    data.professors.forEach((u) => (byKey[`professor:${u.id}`] = u));
-    main().innerHTML = `
-      <div class="page-head"><div><h1>Users</h1>
-      <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student can be in several teachers' classes (one per subject); each teacher can share resources with their own students and manage them. Accounts you add here don't need an approved email; people signing up themselves do (see Approved emails).</p></div>
-      <button class="primary" id="newUser">Add account</button></div>
-      <div class="card"><h3>Professors (${data.professors.length})</h3>
-        ${table(["ID", "Name", "Email", "Class", "Teaches", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
-      <div class="card"><h3>Students (${data.students.length})</h3>
-        ${table(["ID", "Name", "Email", "Course · year · div · batch · roll", "Teachers", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
-
-    document.getElementById("newUser").addEventListener("click", () => userForm(null));
-    main().querySelectorAll("[data-assign]").forEach((select) =>
-      select.addEventListener("change", async () => {
-        try {
-          await post("/users/assign", {
-            student_id: Number(select.dataset.assign),
-            professor_id: select.value ? Number(select.value) : null,
-          });
-          toast(select.value ? "Student assigned." : "Student removed from their class.");
-          showUsers();
-        } catch (err) {
-          toast(err.message);
-          showUsers();
-        }
       })
     );
     main().querySelectorAll("[data-edit]").forEach((b) =>
@@ -1157,7 +1077,7 @@ async function loadTable(tables) {
   view.innerHTML = `
     <div class="toolbar">
       <h3>${esc(dbState.table)}</h3><span class="muted">${data.total} rows</span>
-      <input id="dbSearch" placeholder="Search all columns…" value="${esc(dbState.q)}" />
+      <input id="dbSearch" aria-label="Search all columns" placeholder="Search all columns…" value="${esc(dbState.q)}" />
       ${dbState.filter ? `<span class="chip">${esc(dbState.filter.column)} = ${esc(dbState.filter.value)} <button class="link" id="clearFilter">clear</button></span>` : ""}
       <span style="flex:1"></span>
       <button id="exportCsv">Export CSV</button>

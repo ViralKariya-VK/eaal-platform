@@ -183,6 +183,36 @@ def _squash(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+_MAX_TITLE_LENGTH = 200
+_MAX_STAGE_MINUTES = 600
+
+
+def _clean_title(raw: Any, what: str = "Session Title") -> str:
+    """A lab or follow-up title: not blank, one line, not absurdly long."""
+    title = _squash(str(raw or ""))
+    if not title:
+        raise ValueError(f"{what} is required.")
+    if len(title) > _MAX_TITLE_LENGTH:
+        raise ValueError(f"{what} can be at most {_MAX_TITLE_LENGTH} characters.")
+    return title
+
+
+def _clean_minutes(raw: Any) -> int | None:
+    """How long a stage lasts: nothing (no timer) or a whole number of minutes from 1 to 600."""
+    if raw is None or raw == "":
+        return None
+    problem = f"A stage can last from 1 to {_MAX_STAGE_MINUTES} whole minutes."
+    if isinstance(raw, bool) or not isinstance(raw, int | float | str):
+        raise ValueError(problem)
+    try:
+        number = float(raw)
+    except ValueError:
+        raise ValueError(problem) from None
+    if number != int(number) or not 1 <= number <= _MAX_STAGE_MINUTES:
+        raise ValueError(problem)
+    return int(number)
+
+
 def _paste_comes_from_ai(pasted: str, replies: list[str]) -> bool:
     """Whether pasted text is (mostly) something the AI assistant wrote."""
     whole = _squash(pasted)
@@ -894,23 +924,30 @@ class CavyApi:
         ``description``, ``ai_assistance_mode``, ``duration_minutes``.
         """
         self._require_professor_id()
+        try:
+            title = _clean_title(followup.get("title"), "A title")
+            minutes = _clean_minutes(followup.get("duration_minutes"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         task_id = create_followup_assessment_row(
             self._session_factory,
             source_task_id=followup["source_task_id"],
             kind=AssessmentKind(followup["kind"]),
-            title=followup["title"],
+            title=title,
             description=followup.get("description"),
             ai_assistance_mode=AIAssistanceMode(followup.get("ai_assistance_mode", "RESTRICTED")),
-            duration_minutes=followup.get("duration_minutes"),
+            duration_minutes=minutes,
         )
-        return {"task_id": task_id}
+        return {"ok": True, "task_id": task_id}
 
     def update_followup_assessment(self, task_id: int, followup: dict[str, Any]) -> dict[str, Any]:
         """Edit a follow-up's title, problem, AI mode and time."""
         self._require_professor_id()
-        title = str(followup.get("title") or "").strip()
-        if not title:
-            return {"ok": False, "error": "A title is required."}
+        try:
+            title = _clean_title(followup.get("title"), "A title")
+            minutes = _clean_minutes(followup.get("duration_minutes"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         try:
             update_followup_row(
                 self._session_factory,
@@ -920,7 +957,7 @@ class CavyApi:
                 ai_assistance_mode=AIAssistanceMode(
                     followup.get("ai_assistance_mode", "RESTRICTED")
                 ),
-                duration_minutes=followup.get("duration_minutes"),
+                duration_minutes=minutes,
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
@@ -941,25 +978,29 @@ class CavyApi:
         """
         professor_id = self._require_professor_id()
         try:
+            title = _clean_title(lab.get("title"))
             target = self._lab_target(professor_id, lab)
-        except academics.AcademicError as exc:
+        except (ValueError, academics.AcademicError) as exc:
             return {"ok": False, "error": str(exc)}
         stage_inputs = lab.get("stages") or []
         stage_types = _STAGE_TYPES
         if len(stage_inputs) != len(stage_types):
             raise ValueError(f"Expected {len(stage_types)} stage configs, got {len(stage_inputs)}")
 
-        stage_plan = tuple(
-            (
-                stage_type,
-                AIAssistanceMode(stage_input["ai_assistance_mode"]),
-                stage_input.get("duration_minutes"),
+        try:
+            stage_plan = tuple(
+                (
+                    stage_type,
+                    AIAssistanceMode(stage_input["ai_assistance_mode"]),
+                    _clean_minutes(stage_input.get("duration_minutes")),
+                )
+                for stage_type, stage_input in zip(stage_types, stage_inputs, strict=True)
             )
-            for stage_type, stage_input in zip(stage_types, stage_inputs, strict=True)
-        )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         task_id = create_lab_row(
             self._session_factory,
-            title=lab["title"],
+            title=title,
             description=lab.get("description"),
             learning_objective=lab.get("topic"),
             difficulty=lab.get("difficulty"),
@@ -1042,12 +1083,10 @@ class CavyApi:
     def update_lab(self, task_id: int, lab: dict[str, Any]) -> dict[str, Any]:
         """Save an edited lab. ``lab`` has the same keys as ``create_lab``'s payload."""
         professor_id = self._require_professor_id()
-        title = (lab.get("title") or "").strip()
-        if not title:
-            return {"ok": False, "error": "Session Title is required."}
         try:
+            title = _clean_title(lab.get("title"))
             target = self._lab_target(professor_id, lab)
-        except academics.AcademicError as exc:
+        except (ValueError, academics.AcademicError) as exc:
             return {"ok": False, "error": str(exc)}
         try:
             update_lab_row(
@@ -1061,7 +1100,10 @@ class CavyApi:
                 division=target["division"],
                 batch=target["batch"],
                 stage_plan=tuple(
-                    (AIAssistanceMode(stage["ai_assistance_mode"]), stage.get("duration_minutes"))
+                    (
+                        AIAssistanceMode(stage["ai_assistance_mode"]),
+                        _clean_minutes(stage.get("duration_minutes")),
+                    )
                     for stage in lab.get("stages") or []
                 ),
                 retarget=True,

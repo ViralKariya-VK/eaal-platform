@@ -447,3 +447,72 @@ def test_init_db_upgrades_a_database_created_before_archiving(tmp_path: Path) ->
             ("Legacy lab", None)
         ]
     upgraded.dispose()
+
+
+# -- form validation (found by the screen-by-screen audit) -------------------------------
+
+
+@pytest.mark.parametrize("minutes", [-5, 0, 601, 99999, 12.5, "abc", True])
+def test_a_lab_is_refused_when_a_stage_time_makes_no_sense(
+    api: tuple[CavyApi, dict[str, Any]], minutes: Any
+) -> None:
+    cavy, _ = api
+    stages = _lab_payload()["stages"]
+    stages[0] = {"duration_minutes": minutes, "ai_assistance_mode": "FULL"}
+
+    result = cavy.create_lab(_lab_payload(stages=stages))
+
+    assert result["ok"] is False
+    assert "1 to 600" in result["error"]
+    assert cavy.get_professor_labs() == []
+
+
+@pytest.mark.parametrize("minutes", [None, "", 1, 20, "45", 600, 90.0])
+def test_a_lab_accepts_no_timer_or_whole_minutes(
+    api: tuple[CavyApi, dict[str, Any]], minutes: Any
+) -> None:
+    cavy, _ = api
+    stages = _lab_payload()["stages"]
+    stages[1] = {"duration_minutes": minutes, "ai_assistance_mode": "FULL"}
+
+    assert cavy.create_lab(_lab_payload(stages=stages))["ok"] is True
+
+
+@pytest.mark.parametrize("title", ["", "   ", None, "x" * 201])
+def test_a_lab_needs_a_sensible_title(api: tuple[CavyApi, dict[str, Any]], title: Any) -> None:
+    cavy, _ = api
+
+    result = cavy.create_lab(_lab_payload(title=title))
+
+    assert result["ok"] is False
+    assert "Session Title" in result["error"]
+
+
+def test_a_lab_title_is_stored_on_one_line(api: tuple[CavyApi, dict[str, Any]]) -> None:
+    cavy, _ = api
+    task_id = _create(cavy, title="  Sorting \n   Basics  ")
+
+    assert cavy.get_lab(task_id)["title"] == "Sorting Basics"
+
+
+def test_editing_a_lab_checks_the_stage_times_too(api: tuple[CavyApi, dict[str, Any]]) -> None:
+    cavy, _ = api
+    task_id = _create(cavy)
+    stages = _lab_payload()["stages"]
+    stages[2] = {"duration_minutes": -1, "ai_assistance_mode": "RESTRICTED"}
+
+    result = cavy.update_lab(task_id, _lab_payload(stages=stages))
+
+    assert result["ok"] is False and "1 to 600" in result["error"]
+    assert cavy.get_lab(task_id)["stages"][2]["duration_minutes"] == 20
+
+
+def test_a_follow_up_needs_a_title_and_a_sensible_time(api: tuple[CavyApi, dict[str, Any]]) -> None:
+    cavy, _ = api
+    task_id = _create(cavy)
+    base = {"source_task_id": task_id, "kind": "TRANSFER", "title": "T", "duration_minutes": 20}
+
+    assert cavy.create_followup_assessment({**base, "title": " "})["ok"] is False
+    assert cavy.create_followup_assessment({**base, "duration_minutes": -3})["ok"] is False
+    assert cavy.get_followup_assessments(task_id) == []
+    assert cavy.create_followup_assessment(base)["ok"] is True

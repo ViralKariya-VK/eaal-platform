@@ -67,6 +67,30 @@ function renderInlineMarkdown(escapedText) {
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
 }
 
+// Run a button's action once: the button stays disabled until the request ends, so a double
+// click can't send it twice (two labs, two follow-ups). Re-enabled afterwards, including on failure.
+function runOnce(button, action) {
+  if (button.disabled) return Promise.resolve();
+  button.disabled = true;
+  return Promise.resolve()
+    .then(action)
+    .finally(() => {
+      button.disabled = false;
+    });
+}
+
+// A stage length from a form field: empty means "no timer", otherwise whole minutes from 1 to 600.
+// Returns { minutes, error } so the caller can show the message next to the form.
+function readMinutes(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return { minutes: null };
+  const number = Number(text);
+  if (!Number.isInteger(number) || number < 1 || number > 600) {
+    return { minutes: null, error: "Stage time must be a whole number of minutes from 1 to 600 (or empty for no timer)." };
+  }
+  return { minutes: number };
+}
+
 function renderMarkdown(rawText) {
   const lines = escapeHtml(rawText).split("\n");
   let html = "";
@@ -175,7 +199,7 @@ function authHero() {
       <div>
         <span class="brand-mark">CAVY</span>
         <div class="tagline">Cognitive Interaction Quotient</div>
-        <h1>Collaboration has a score now.</h1>
+        <p class="hero-title">Collaboration has a score now.</p>
         <p>CAVY doesn't just grade what you submit — it measures your CIQ: how well you question, edit, and reason alongside AI, session by session.</p>
       </div>
       <div class="auth-stats">
@@ -346,7 +370,7 @@ function showForgotPassword(startEmail = "") {
       ${authHero()}
       <div class="auth-panel"><div class="auth-card">
         <div class="icon-tile">${icon("lock")}</div>
-        <h2>Reset your password</h2>
+        <h1>Reset your password</h1>
         ${inner}
       </div></div>`;
   };
@@ -397,7 +421,7 @@ function showForgotPassword(startEmail = "") {
     frame(`
       <p class="notice notice-ok">${escapeHtml(message)}</p>
       <div class="auth-form">
-        <label>6-digit code <input type="text" id="resetCode" inputmode="numeric" maxlength="6" placeholder="123456" /></label>
+        <label>6-digit code <input type="text" id="resetCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456" /></label>
         <label>New password <input type="password" id="resetNew" placeholder="At least 8 characters" autocomplete="new-password" /></label>
         <label>Repeat new password <input type="password" id="resetRepeat" autocomplete="new-password" /></label>
         <p class="auth-error" id="resetError"></p>
@@ -450,7 +474,7 @@ function showLogin() {
     <div class="auth-panel">
       <div class="auth-card">
         <div class="icon-tile">${icon("sparkle")}</div>
-        <h2>Welcome back</h2>
+        <h1>Welcome back</h1>
         <p class="subtitle">Sign in to pick up your session where you left it.</p>
         ${loginNotice ? `<p class="notice notice-warn">${escapeHtml(loginNotice)}</p>` : ""}
         <div class="role-toggle">
@@ -577,7 +601,7 @@ function showCreateAccount() {
     <div class="auth-panel">
       <div class="auth-card">
         <div class="icon-tile">${icon("sparkle")}</div>
-        <h2>Create an account</h2>
+        <h1>Create an account</h1>
         <p class="subtitle">Set up your CAVY login.</p>
         <div class="role-toggle">
           <button class="${loginRole === "student" ? "active" : ""}" data-role="student">Student</button>
@@ -1024,8 +1048,10 @@ function renderWorkspaceHeaderExtra(durationMinutes, onEndSession, elapsedSecond
   `;
   document.getElementById("endSessionButton").addEventListener("click", onEndSession);
 
+  // Count down from a fixed end time, so a throttled or suspended window can't make the clock drift.
+  const endsAt = Date.now() + remaining * 1000;
   workspaceTimerId = setInterval(() => {
-    remaining -= 1;
+    remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
     const timerEl = document.getElementById("sessionTimer");
     if (!timerEl) {
       clearInterval(workspaceTimerId);
@@ -1033,7 +1059,11 @@ function renderWorkspaceHeaderExtra(durationMinutes, onEndSession, elapsedSecond
     }
     timerEl.querySelector(".timer-value").textContent = formatClock(remaining);
     timerEl.classList.toggle("low", remaining <= 60);
-    if (remaining <= 0) clearInterval(workspaceTimerId);
+    if (remaining <= 0) {
+      clearInterval(workspaceTimerId);
+      timerEl.querySelector(".timer-label").textContent = "Time is up";
+      showToast("Time is up for this stage.");
+    }
   }, 1000);
 }
 
@@ -1260,7 +1290,7 @@ function showResourceForm(existing, onSaved) {
         <label class="modal-field">Description (optional) <input type="text" id="resDesc" value="${escapeHtml(existing && existing.description ? existing.description : "")}" /></label>
         <div id="kindFile" class="modal-field">
           <span>${editing ? `Current file: <b>${escapeHtml(existing.filename || "")}</b> (${formatBytes(existing.size_bytes)}). Choose another to replace it.` : "File (PDF, document, slides, image, data… up to 15 MB)"}</span>
-          <input type="file" id="resFile" />
+          <input type="file" id="resFile" aria-label="File to share" />
         </div>
         <label class="modal-field" id="kindLink">Web address <input type="text" id="resUrl" placeholder="https://…" value="${escapeHtml(existing && existing.url ? existing.url : "")}" /></label>
         <label class="modal-field" id="kindNote">Instructions <textarea id="resBody" rows="6">${escapeHtml(existing && existing.body ? existing.body : "")}</textarea></label>
@@ -2201,23 +2231,26 @@ function showTeachingCourses(firstTime) {
         firstTime ? "home" : "students"
       );
       const done = () => (firstTime ? showMyLabs() : showStudents());
-      document.getElementById("saveTeaching").addEventListener("click", () => {
+      const saveTeaching = document.getElementById("saveTeaching");
+      saveTeaching.addEventListener("click", () => {
         const ids = [...document.querySelectorAll("[data-course]:checked")].map((c) => Number(c.dataset.course));
-        api()
-          .set_my_courses(ids)
-          .then((result) => {
-            if (!result.ok) {
-              document.getElementById("teachingError").textContent = result.error || "Couldn't save.";
-              return;
-            }
-            if (result.added_students) {
-              showToast(`${result.added_students} student${result.added_students === 1 ? "" : "s"} joined your class.`);
-            }
-            done();
-          })
-          .catch((err) => {
-            document.getElementById("teachingError").textContent = errorText(err);
-          });
+        runOnce(saveTeaching, () =>
+          api()
+            .set_my_courses(ids)
+            .then((result) => {
+              if (!result.ok) {
+                document.getElementById("teachingError").textContent = result.error || "Couldn't save.";
+                return;
+              }
+              if (result.added_students) {
+                showToast(`${result.added_students} student${result.added_students === 1 ? "" : "s"} joined your class.`);
+              }
+              done();
+            })
+            .catch((err) => {
+              document.getElementById("teachingError").textContent = errorText(err);
+            })
+        );
       });
       const other = document.getElementById(firstTime ? "skipTeaching" : "cancelTeaching");
       other.addEventListener("click", done);
@@ -2294,7 +2327,7 @@ function renderCreateSession(existing, courses) {
         <h3>${stage.label}</h3>
         <label>
           Duration (minutes)
-          <input type="number" min="1" class="stage-duration" data-stage="${stage.type}" value="${duration}" />
+          <input type="number" min="1" max="600" step="1" class="stage-duration" data-stage="${stage.type}" value="${duration}" />
         </label>
         <label>
           AI Mode
@@ -2316,12 +2349,12 @@ function renderCreateSession(existing, courses) {
     <div class="card">
       <h3 style="margin-bottom:14px;">Session Details</h3>
       <div class="form-grid">
-        <label class="span-2">Session Title <span class="required">*</span>
+        <label class="span-2"><span class="label-text">Session Title <span class="required" title="Required">*</span></span>
           <input type="text" id="sessionTitle" placeholder="Enter session title" />
         </label>
         ${
           courses.length
-            ? `<label>Course <span class="required">*</span>
+            ? `<label><span class="label-text">Course <span class="required" title="Required">*</span></span>
                 <select id="sessionCourse">${cohortSelectOptions(courses.map((c) => ({ value: c.id, label: c.label })), "Choose a course")}</select>
               </label>
               <label>Topic
@@ -2386,21 +2419,31 @@ function renderCreateSession(existing, courses) {
       difficulty: document.getElementById("sessionDifficulty").value,
     })
   );
-  document.getElementById("createLabButton").addEventListener("click", () => {
+  const createButton = document.getElementById("createLabButton");
+  createButton.addEventListener("click", () => {
     const title = document.getElementById("sessionTitle").value.trim();
     const errorEl = document.getElementById("createLabError");
     if (!title) {
       errorEl.textContent = "Session Title is required.";
+      document.getElementById("sessionTitle").focus();
       return;
     }
     errorEl.textContent = "";
 
-    const stages = STAGE_CONFIG.map((stage) => ({
-      duration_minutes:
-        Number(document.querySelector(`.stage-duration[data-stage="${stage.type}"]`).value) ||
-        null,
-      ai_assistance_mode: document.querySelector(`.stage-mode[data-stage="${stage.type}"]`).value,
-    }));
+    const stages = [];
+    for (const stage of STAGE_CONFIG) {
+      const { minutes, error } = readMinutes(
+        document.querySelector(`.stage-duration[data-stage="${stage.type}"]`).value
+      );
+      if (error) {
+        errorEl.textContent = `${stage.label}: ${error}`;
+        return;
+      }
+      stages.push({
+        duration_minutes: minutes,
+        ai_assistance_mode: document.querySelector(`.stage-mode[data-stage="${stage.type}"]`).value,
+      });
+    }
 
     const text = (id) => {
       const field = document.getElementById(id);
@@ -2426,12 +2469,17 @@ function renderCreateSession(existing, courses) {
     };
 
     if (!editing) {
-      api()
-        .create_lab(payload)
-        .then((result) => {
-          if (result && result.ok === false) errorEl.textContent = result.error || "Couldn't create the lab.";
-          else showMyLabs();
-        });
+      runOnce(createButton, () =>
+        api()
+          .create_lab(payload)
+          .then((result) => {
+            if (result && result.ok === false) errorEl.textContent = result.error || "Couldn't create the lab.";
+            else showMyLabs();
+          })
+          .catch((err) => {
+            errorEl.textContent = errorText(err);
+          })
+      );
       return;
     }
     // A locked stage's <select> is disabled, so send back the mode it already has.
@@ -2440,12 +2488,17 @@ function renderCreateSession(existing, courses) {
         stage.ai_assistance_mode = existing.stages[index].ai_assistance_mode;
       }
     });
-    api()
-      .update_lab(existing.id, payload)
-      .then((result) => {
-        if (result.ok) showMyLabs();
-        else errorEl.textContent = result.error || "Couldn't save the changes.";
-      });
+    runOnce(createButton, () =>
+      api()
+        .update_lab(existing.id, payload)
+        .then((result) => {
+          if (result.ok) showMyLabs();
+          else errorEl.textContent = result.error || "Couldn't save the changes.";
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+        })
+    );
   });
 
   if (courses.length) wireCohortSelects("session", courses, { current: editing ? existing : {}, anyLabels: true });
@@ -2489,6 +2542,7 @@ function showToast(message) {
   document.querySelectorAll(".toast").forEach((el) => el.remove());
   const toast = document.createElement("div");
   toast.className = "toast";
+  toast.setAttribute("role", "status");
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 5000);
@@ -2580,7 +2634,7 @@ function showFollowupModal({ sourceTaskId = null, followup = null, onDone }) {
         ${editing && followup.mode_locked ? `<span class="muted">Locked — students have already started it.</span>` : ""}
       </label>
       <label>Duration (minutes)
-        <input type="number" id="followupDuration" value="20" min="1" />
+        <input type="number" id="followupDuration" value="20" min="1" max="600" step="1" />
       </label>
       <p class="muted" id="followupError" style="color:var(--danger-text, #b3261e);"></p>
       <div class="modal-actions">
@@ -2605,29 +2659,43 @@ function showFollowupModal({ sourceTaskId = null, followup = null, onDone }) {
   );
 
   document.getElementById("followupCancel").addEventListener("click", () => overlay.remove());
-  document.getElementById("followupCreate").addEventListener("click", () => {
+  const createFollowup = document.getElementById("followupCreate");
+  createFollowup.addEventListener("click", () => {
     const title = value("followupTitle").trim();
     const errorEl = document.getElementById("followupError");
+    errorEl.textContent = "";
     if (!title) {
       errorEl.textContent = "A title is required.";
+      document.getElementById("followupTitle").focus();
+      return;
+    }
+    const { minutes, error } = readMinutes(value("followupDuration"));
+    if (error) {
+      errorEl.textContent = error;
       return;
     }
     const fields = {
       title,
       description: value("followupDescription").trim(),
       ai_assistance_mode: value("followupAiMode"),
-      duration_minutes: Number(value("followupDuration")) || null,
+      duration_minutes: minutes,
     };
-    const request = editing
-      ? api().update_followup_assessment(followup.id, fields)
-      : api().create_followup_assessment({ ...fields, source_task_id: sourceTaskId, kind: value("followupKind") });
-    request.then((result) => {
-      if (result && result.ok === false) {
-        errorEl.textContent = result.error || "That didn't work.";
-        return;
-      }
-      overlay.remove();
-      onDone();
+    runOnce(createFollowup, () => {
+      const request = editing
+        ? api().update_followup_assessment(followup.id, fields)
+        : api().create_followup_assessment({ ...fields, source_task_id: sourceTaskId, kind: value("followupKind") });
+      return request
+        .then((result) => {
+          if (result && result.ok === false) {
+            errorEl.textContent = result.error || "That didn't work.";
+            return;
+          }
+          overlay.remove();
+          onDone();
+        })
+        .catch((err) => {
+          errorEl.textContent = errorText(err);
+        });
     });
   });
 }
@@ -3133,7 +3201,7 @@ function showConceptCheckModal(sessionId, onDone) {
         <div class="modal-card">
           <h2>Before you submit</h2>
           <p class="muted">${escapeHtml(question)}</p>
-          <textarea id="conceptCheckInput" rows="5" placeholder="Type your explanation here..."></textarea>
+          <textarea id="conceptCheckInput" rows="5" aria-label="Your explanation" placeholder="Type your explanation here..."></textarea>
           <div class="modal-actions">
             <button class="ghost" id="conceptCheckSkip">Skip</button>
             <button class="primary" id="conceptCheckSubmit">Submit Explanation</button>
@@ -3188,7 +3256,7 @@ function showWorkspace(info) {
       <div class="task-header">
         <div class="icon-tile">${icon("file")}</div>
         <div class="task-title-row">
-          <h2>${escapeHtml(info.task_title)}</h2>
+          <h1>${escapeHtml(info.task_title)}</h1>
           <div class="meta-pills">
             ${pills.join("")}
             ${info.task_description ? `<button class="ghost toggle-description" id="toggleDescription">Hide Description</button>` : ""}
@@ -3205,7 +3273,6 @@ function showWorkspace(info) {
                 <button class="run-button" id="runButton">${icon("arrowRight")}Run Code</button>
                 <button class="ghost-icon" id="resetButton">${icon("refresh")}Reset</button>
                 ${actionButtons}
-                <button class="icon-only" id="moreButton" title="More actions (coming soon)">${icon("moreHoriz")}</button>
                 <button class="icon-only" id="expandButton" title="Focus mode">${icon("expand")}</button>
               </div>
             </div>
@@ -3455,13 +3522,32 @@ function showWorkspace(info) {
       });
   });
 
-  document.getElementById("resetButton").addEventListener("click", () => {
+  const resetCode = () => {
     workspaceFiles = { ...info.starter_files };
     activeFilename = "main.py";
     if (currentEditor) currentEditor.setValue(workspaceFiles["main.py"] || "");
     renderFileTabs();
     document.getElementById("outputShell").classList.add("hidden");
     api().log_code_edit(info.session_id, currentFiles(), activeFilename, true, false);
+  };
+  document.getElementById("resetButton").addEventListener("click", () => {
+    // Nothing to lose when the code is still the starter code: reset straight away.
+    const current = currentFiles();
+    const starter = info.starter_files || {};
+    const unchanged =
+      Object.keys(current).length === Object.keys(starter).length &&
+      Object.keys(current).every((name) => current[name] === starter[name]);
+    if (unchanged) {
+      resetCode();
+      return;
+    }
+    confirmModal({
+      title: "Reset your code?",
+      message: "Everything you have written in this stage goes back to the starting code. This can't be undone.",
+      confirmLabel: "Reset code",
+      danger: true,
+      onConfirm: resetCode,
+    });
   });
 
   document.getElementById("expandButton").addEventListener("click", () => {
@@ -3529,8 +3615,8 @@ function renderChatPanel(container, info, getFiles) {
       }
       <div class="chat-transcript" id="chatTranscript"></div>
       <div class="chat-input-row">
-        <input type="text" id="chatInput" placeholder="Ask anything..." ${restricted ? "disabled" : ""} />
-        <button class="accent" id="chatSendButton" ${restricted ? "disabled" : ""}>${icon("send")}</button>
+        <input type="text" id="chatInput" placeholder="Ask anything..." aria-label="Message the AI assistant" ${restricted ? "disabled" : ""} />
+        <button class="accent" id="chatSendButton" aria-label="Send message" title="Send message" ${restricted ? "disabled" : ""}>${icon("send")}</button>
       </div>
       ${restricted ? "" : `<div class="chat-disclaimer">AI can make mistakes. Verify important information.</div>`}
     </div>
@@ -4121,6 +4207,82 @@ function enterApp(role, name, mustChangePassword = false, needsDetails = false) 
 function init() {
   showLogin();
 }
+
+// -- Dialogs and live regions (accessibility) ---------------------------------------
+// Every dialog (an element with class "modal-overlay"), wherever it is created, gets dialog
+// semantics, focus moved into it, Tab kept inside it, Escape to cancel, and focus handed back to
+// where it came from. Error lines are announced to screen readers when their text changes.
+(function watchDialogsAndErrors() {
+  const FOCUSABLE =
+    'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const CANCEL_WORDS = /^(cancel|close|not now)/i;
+  let counter = 0;
+
+  function setUpDialog(overlay) {
+    const card = overlay.querySelector(".modal-card") || overlay;
+    const heading = card.querySelector("h1, h2, h3");
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    if (heading) {
+      if (!heading.id) heading.id = `dialogTitle${++counter}`;
+      card.setAttribute("aria-labelledby", heading.id);
+    }
+    const previous = document.activeElement;
+    const focusable = () => [...card.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    const first =
+      card.querySelector("[autofocus]") ||
+      card.querySelector('input:not([type="hidden"]):not([type="file"]), textarea, select') ||
+      card.querySelector("button.primary, button.danger") ||
+      focusable()[0];
+    setTimeout(() => first && first.focus(), 0);
+
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        const cancel = [...card.querySelectorAll("button")].find((b) => CANCEL_WORDS.test((b.textContent || "").trim()));
+        if (cancel) {
+          e.preventDefault();
+          e.stopPropagation();
+          cancel.click();
+        }
+      } else if (e.key === "Tab") {
+        const items = focusable();
+        if (!items.length) return;
+        const at = items.indexOf(document.activeElement);
+        if (e.shiftKey && at <= 0) {
+          e.preventDefault();
+          items[items.length - 1].focus();
+        } else if (!e.shiftKey && (at === items.length - 1 || at === -1)) {
+          e.preventDefault();
+          items[0].focus();
+        }
+      }
+    });
+    const gone = new MutationObserver(() => {
+      if (document.body.contains(overlay)) return;
+      gone.disconnect();
+      if (previous && document.body.contains(previous)) previous.focus();
+    });
+    gone.observe(document.body, { childList: true });
+  }
+
+  function markLiveRegions(root) {
+    root
+      .querySelectorAll('.auth-error:not([role]), [id$="Error"]:not([role]), .field-error:not([role])')
+      .forEach((el) => el.setAttribute("role", "alert"));
+  }
+
+  new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.classList.contains("modal-overlay")) setUpDialog(node);
+        markLiveRegions(node);
+        if (node.matches('.auth-error, [id$="Error"]') && !node.hasAttribute("role")) node.setAttribute("role", "alert");
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  markLiveRegions(document);
+})();
 
 if (window.pywebview) {
   init();

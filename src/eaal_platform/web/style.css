@@ -31,7 +31,7 @@
   --line-on-navy: #2b3c58;
   --text-primary: #241f16;
   --text-on-navy: #f4efe3;
-  --text-muted: #8a8270;
+  --text-muted: #6b6454; /* was #8a8270: 3.5:1 on cream, below the 4.5:1 needed for small text */
   --text-muted-on-navy: #8b96ac;
 
   --amber-500: #e0a44a;
@@ -39,7 +39,7 @@
   --amber-text: #8a5a2e;
   --amber-bg: #f6e7d0;
   --teal-500: #2fa88c;
-  --teal-text: #1e7a64;
+  --teal-text: #17664f; /* was #1e7a64: 4.3:1 on the pale teal pills */
   --teal-bg: #dceee9;
   --red-text: #a5432f;
   --red-bg: #f6ded6;
@@ -48,6 +48,7 @@
   --editor-text: #e4e8f0;
   --editor-gutter: #161d2c;
   --editor-line-number: #5b6b85;
+  --editor-muted: #8f9db5; /* status text on the editor's dark bars (6:1) */
 
   --radius-card: 12px;
   --radius-control: 8px;
@@ -691,7 +692,7 @@ button.ghost {
   flex: 1;
   min-width: 0;
 }
-.task-header h2 {
+.task-header h1 {
   font-size: 16px;
   display: inline;
 }
@@ -860,7 +861,7 @@ button.ghost {
   gap: 14px;
   padding: 6px 14px;
   font-size: 11px;
-  color: var(--editor-line-number);
+  color: var(--editor-muted);
   border-top: 1px solid var(--editor-gutter);
   flex-shrink: 0;
 }
@@ -889,7 +890,7 @@ button.ghost {
 }
 .output-header {
   background: var(--editor-gutter);
-  color: var(--editor-line-number);
+  color: var(--editor-muted);
   font-size: 11px;
   padding: 6px 12px;
   flex-shrink: 0;
@@ -1293,11 +1294,14 @@ textarea {
   color: var(--text-muted-on-navy);
   margin-top: 2px;
 }
-.auth-hero h1 {
+.auth-hero .hero-title {
+  font-family: "Lora", Georgia, serif;
+  font-weight: 700;
   font-size: 34px;
   line-height: 1.25;
   margin: 24px 0 14px;
   max-width: 420px;
+  color: var(--text-on-navy);
 }
 .auth-hero p {
   color: var(--text-muted-on-navy);
@@ -1323,8 +1327,7 @@ textarea {
 .auth-panel {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow-y: auto;
   padding: 40px;
   background: var(--cream-0);
   min-width: 0;
@@ -1332,6 +1335,7 @@ textarea {
 .auth-card {
   width: 100%;
   max-width: 360px;
+  margin: auto; /* centred when there is room, scrolls from the top when there is not */
 }
 .auth-card .icon-tile {
   width: 44px;
@@ -1344,6 +1348,7 @@ textarea {
   justify-content: center;
   margin-bottom: 18px;
 }
+.auth-card h1,
 .auth-card h2 {
   font-size: 24px;
 }
@@ -2228,4 +2233,243 @@ textarea {
   padding: 1px 6px;
   color: var(--text-muted, #7a7367);
   margin-left: 4px;
+}
+
+/* -- Accessibility and polish ------------------------------------------------------------
+   Added by the screen-by-screen QA pass. Everything here uses the colours, radii and spacing
+   above; nothing changes the look of a screen except where it was broken. */
+
+/* Visible keyboard focus everywhere (the browser default was invisible on the navy bars). */
+:focus-visible {
+  outline: 2px solid var(--amber-500);
+  outline-offset: 2px;
+}
+.sidebar :focus-visible,
+.app-header :focus-visible,
+.editor-toolbar :focus-visible {
+  outline-color: #f4c97b;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 1px;
+  border-color: var(--teal-500);
+}
+.editor-container.fallback textarea:focus-visible {
+  outline: 2px solid var(--amber-500);
+  outline-offset: -2px;
+}
+
+/* Text-style controls are bigger to hit than they look: padding grows the target, the
+   negative margin keeps the layout exactly where it was. */
+.auth-link,
+.auth-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+}
+.link-button {
+  display: inline-block;
+  padding: 8px 4px;
+  margin: -8px -4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.back-link {
+  padding: 8px 4px;
+  margin-left: -4px;
+  min-height: 32px;
+}
+.ciq-pill {
+  padding: 5px 12px;
+}
+.chat-tabs button {
+  min-height: 28px;
+}
+.data-table .view-report-button,
+.data-table .view-work {
+  padding: 7px 12px;
+}
+.stage-tab {
+  padding: 7px 16px;
+}
+.editor-toolbar-actions button {
+  min-height: 32px;
+}
+
+/* A required star sits beside its label, not on a line of its own. */
+.label-text {
+  display: block;
+}
+.required {
+  margin-left: 2px;
+}
+
+/* Long unbroken text (a pasted string, a very long name) wraps instead of spilling out. */
+.chat-transcript,
+.chat-panel,
+.problem-statement,
+.work-output,
+.data-table td,
+.tree-node > summary,
+.card h3,
+.page-heading h1 {
+  overflow-wrap: anywhere;
+}
+
+/* The class lists: every division's table uses the same columns so names, emails and
+   buttons line up from one table to the next. */
+.tree-table .data-table {
+  table-layout: fixed;
+}
+.tree-table .data-table th:nth-child(1) { width: 25%; }
+.tree-table .data-table th:nth-child(2) { width: 27%; }
+.tree-table .data-table th:nth-child(3) { width: 10%; }
+.tree-table .data-table th:nth-child(4) { width: 10%; }
+.tree-table .data-table th:nth-child(5) { width: 8%; }
+.tree-table .data-table th:nth-child(6) { width: 20%; }
+
+/* Forms keep a readable line length on large screens. */
+#app .card > .form-grid,
+#app .stage-config-grid {
+  max-width: 1040px;
+}
+#app > .card {
+  max-width: 1120px;
+}
+
+/* Workspace toolbar: wrap on narrow windows instead of squeezing the labels. */
+.editor-toolbar {
+  flex-wrap: wrap;
+}
+.editor-toolbar-actions {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* Respect the system's reduced-motion setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* -- Narrower windows ------------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .chat-column {
+    min-width: 230px;
+  }
+}
+@media (max-width: 900px) {
+  .shell {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    max-height: 40vh;
+    overflow-y: auto;
+    padding: 8px 12px;
+    flex-shrink: 0;
+  }
+  .sidebar .nav-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .nav-item {
+    width: auto;
+    white-space: nowrap;
+  }
+  .sidebar-footer {
+    display: none;
+  }
+  #app {
+    padding: 20px 16px;
+  }
+  .workspace-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .editor-column,
+  .chat-column {
+    flex: none;
+    max-width: none;
+    min-width: 0;
+  }
+  .editor-shell {
+    min-height: 320px;
+  }
+  .chat-column {
+    min-height: 360px;
+  }
+  .summary-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stage-config-grid {
+    grid-template-columns: 1fr;
+  }
+  .card:has(> .data-table),
+  .tree-table {
+    overflow-x: auto;
+  }
+  /* Tables keep a readable width and scroll sideways inside their card instead of crushing the text. */
+  .data-table {
+    min-width: 640px;
+  }
+  .data-table td button:not(.link-button),
+  .data-table td .pill {
+    white-space: nowrap;
+  }
+}
+@media (max-width: 640px) {
+  .auth-hero {
+    display: none;
+  }
+  .auth-panel {
+    padding: 20px 16px;
+  }
+  .app-header {
+    padding: 0 14px;
+  }
+  .app-header .tagline,
+  .header-label {
+    display: none;
+  }
+  .header-right {
+    gap: 8px;
+  }
+  .form-grid,
+  .field-pair {
+    grid-template-columns: 1fr;
+  }
+  .group-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .form-grid .span-2 {
+    grid-column: auto;
+  }
+  .page-heading {
+    flex-wrap: wrap;
+  }
+  .summary-cards {
+    grid-template-columns: 1fr;
+  }
+  .modal-card {
+    margin: 12px;
+    padding: 18px;
+  }
+  .filter-bar {
+    align-items: stretch;
+  }
+  .filter-bar > * {
+    flex: 1 1 100%;
+  }
 }

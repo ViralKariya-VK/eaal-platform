@@ -6,7 +6,7 @@
   --cream-100: #f1ead9;
   --line: #e4dcc8;
   --text: #241f16;
-  --muted: #8a8270;
+  --muted: #6b6454; /* was #8a8270: 3.5:1 on cream, below 4.5:1 for small text */
   --on-navy: #f4efe3;
   --muted-on-navy: #8b96ac;
   --amber: #e0a44a;
@@ -14,7 +14,7 @@
   --amber-text: #8a5a2e;
   --teal: #2fa88c;
   --teal-bg: #dceee9;
-  --teal-text: #1e7a64;
+  --teal-text: #17664f;
   --red-text: #a5432f;
   --red-bg: #f6ded6;
 }
@@ -527,4 +527,46 @@ td:has(.row-actions) {
   margin: 0;
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* -- Accessibility and polish (QA pass) ----------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-color: var(--teal);
+  outline-offset: 1px;
+}
+/* Small buttons stay compact but are big enough to hit. */
+.row-actions button,
+button#refresh,
+button.link {
+  min-height: 30px;
+}
+button.link {
+  padding: 0 2px;
+}
+.table-list button {
+  min-height: 32px;
+}
+/* The database page: the table list and the rows never push the page wider than the window. */
+.db-grid > * {
+  min-width: 0;
+}
+.table-list {
+  overflow-x: auto;
+}
+.card:has(> table) {
+  overflow-x: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

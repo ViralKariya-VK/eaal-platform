@@ -37,7 +37,9 @@ def check_role(role: str) -> str:
 
 def check_email(raw: str) -> str:
     email = normalise_email(raw or "")
-    if not email or len(email) > 320 or not _EMAIL_RE.match(email):
+    if not email:
+        raise ApprovalError("Enter an email address.")
+    if len(email) > 320 or not _EMAIL_RE.match(email):
         raise ApprovalError(f"“{(raw or '').strip()}” isn't a valid email address.")
     return email
 

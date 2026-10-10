@@ -30,7 +30,7 @@ def test_emails_are_checked_and_stored_in_lower_case(db_session_factory: Factory
     [entry] = approvals.list_entries(db_session_factory, "student")
     assert entry["email"] == "ada@uni.edu"
     assert entry["registered"] is False
-    for bad in ("", "no-at-sign", "a@b", "two@@x.com", "a b@x.com", "a@x.com, b@x.com"):
+    for bad in ("no-at-sign", "a@b", "two@@x.com", "a b@x.com", "a@x.com, b@x.com"):
         with pytest.raises(approvals.ApprovalError, match="valid email"):
             approvals.add_entry(db_session_factory, "student", name=None, email=bad)
     with pytest.raises(approvals.ApprovalError, match="teacher or student"):
@@ -432,3 +432,14 @@ def test_admin_made_and_edited_accounts_use_clean_emails(
         headers=admin,
     )
     assert clash.status_code == 400  # case-insensitive uniqueness
+
+
+def test_a_blank_email_gets_a_plain_message() -> None:
+    import pytest
+
+    from eaal_platform.db.approvals import ApprovalError, check_email
+
+    with pytest.raises(ApprovalError, match="Enter an email address"):
+        check_email("   ")
+    with pytest.raises(ApprovalError, match="isn't a valid email address"):
+        check_email("not-an-email")

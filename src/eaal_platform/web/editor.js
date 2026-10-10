@@ -97,6 +97,7 @@ function createFallbackEditor(container, initialValue) {
   const textarea = document.createElement("textarea");
   textarea.value = initialValue || "";
   textarea.spellcheck = false;
+  textarea.setAttribute("aria-label", "Code editor");
   container.appendChild(textarea);
 
   let changeCallback = null;
