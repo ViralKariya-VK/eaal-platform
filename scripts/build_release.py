@@ -269,6 +269,7 @@ def package_windows() -> Path:
         print("Inno Setup not found; making a zip instead (install Inno Setup for a Setup.exe).")
         archive = shutil.make_archive(str(DIST / f"CAVY-{VERSION}-Windows"), "zip", DIST / "CAVY")
         return Path(archive)
+    os.environ["CAVY_VERSION"] = VERSION  # the installer script names the file from this
     run([iscc, str(ROOT / "packaging" / "cavy.iss")])
     return DIST / f"CAVY-{VERSION}-Windows-Setup.exe"
 
