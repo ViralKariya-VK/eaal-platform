@@ -17,7 +17,7 @@ from typing import Any
 import uvicorn
 
 from eaal_platform.ai.ollama_provider import OllamaProvider
-from eaal_platform.db.bootstrap import seed_demo_content
+from eaal_platform.db.bootstrap import seed_practice_task
 from eaal_platform.db.engine import (
     create_db_engine,
     create_session_factory,
@@ -55,7 +55,8 @@ def build_state(db_path: Path | None) -> ServerState:
     engine = create_db_engine(db_path)
     init_db(engine)
     factory = create_session_factory(engine)
-    seed_demo_content(factory)
+    # A classroom server starts empty: only the Practice area, never the demo labs.
+    seed_practice_task(factory)
     return ServerState(engine, factory, EventLogger(factory), OllamaProvider())
 
 

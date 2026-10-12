@@ -1,220 +1,196 @@
-# CAVY: Cognitive Interaction Quotient
+<h1 align="center">🧠 CAVY</h1>
+<p align="center"><b>The Cognitive Interaction Quotient.</b><br>
+Same code. Different thinking. Now you can tell the difference.</p>
+
+<p align="center">
+  <a href="https://github.com/ViralKariya-VK/eaal-platform/releases"><img alt="Download" src="https://img.shields.io/badge/download-macOS%20%2B%20Windows-1b2c45?style=for-the-badge"></a>
+  <a href="https://www.figma.com/design/1rHhK4KU4ndumQBopIkcT1/CAVY-Platform-Wireframe?node-id=0-1"><img alt="Figma" src="https://img.shields.io/badge/design-Figma-f2a541?style=for-the-badge"></a>
+  <a href="docs/CAVY-Application-Walkthrough.pdf"><img alt="Walkthrough" src="https://img.shields.io/badge/tour-every%20screen-1f7a8c?style=for-the-badge"></a>
+</p>
+
+<p align="center"><img src="docs/img/student-workspace.jpg" alt="The CAVY coding workspace: a lab, an editor, a result and an AI assistant" width="880"></p>
+
+---
+
+## 🎬 The plot
+
+Two students hand in the exact same, perfectly correct linked-list reversal.
+
+One of them poked at it, asked the AI *why* the pointer kept getting lost, fixed it, ran it, and could explain it afterwards.
+The other pasted the answer, hit submit, and went for chai. ☕
+
+Your gradebook sees two identical green ticks. 🟢🟢
+
+**CAVY sees the difference.** It lets students use an AI assistant (that is the whole point), quietly records
+*how* they used it, and turns that trail into a score: the **Cognitive Interaction Quotient**.
 
 > *In the age of AI, we are measuring the answers, but we have stopped measuring the thinker.*
 
-CAVY is a classroom platform for programming education that records **how students work with an AI
-assistant**, not only what they hand in, and turns that record into a score: the **Cognitive Interaction
-Quotient (CIQ)**. It runs on Windows and macOS, with a shared server for a whole class and a browser
-admin panel.
+It is a research instrument and a real, installable classroom platform at the same time. The research question
+shaped the software, and the software exists so the question can finally be tested on real students.
 
-It is a research instrument and a working product at the same time: the research question shaped the
-software, and the software exists so the question can be tested on real students.
-
-<p align="center"><img src="docs/img/student-workspace.jpg" alt="The CAVY coding workspace: a stage-by-stage lab with an editor, output and an AI assistant" width="860"></p>
-
-| | |
-|---|---|
-| **Wireframes** | [CAVY Platform Wireframe on Figma](https://www.figma.com/design/1rHhK4KU4ndumQBopIkcT1/CAVY-Platform-Wireframe?node-id=0-1) |
-| **Installers** | [Releases](https://github.com/ViralKariya-VK/eaal-platform/releases) (macOS `.dmg`, Windows `.exe`) |
-| **Every screen** | [Application walkthrough (PDF)](docs/CAVY-Application-Walkthrough.pdf) |
-| **Engineering evidence** | [Software report (PDF)](docs/Audit%20Report.pdf) |
-| **Group** | Group 04, NMIMS: Viral Kariya, Vanshika Ahuja, Yashika Parmar, Carol Maria |
-
-## The problem
-
-Students now work with ChatGPT, Claude, Gemini and Copilot every day. In a 2025 UK survey, 88% of
-undergraduates had used generative AI for assessments, up from 53% a year earlier (HEPI, 2025), and 84% of
-developers use or plan to use AI tools (Stack Overflow, 2025). Yet a lab is still judged by its final code.
-Two students can submit the same correct answer, one having reasoned with the AI and the other having pasted
-its reply. Existing tools do not tell them apart: AI detectors judge the text, proctoring treats AI as a
-violation, coding platforms grade the output, learning-analytics tools count activity, and assistants only
-help.
-
-The question has changed from *"Did the student use AI?"* to *"How did the student learn while using AI?"*
-
-## The research idea
+## 🔭 The research bit (the serious part, we promise it is short)
 
 CAVY builds on the **AIQ** framework for human-AI collaboration (Ganuthula and Balaraman, 2025) and on the
-literature on automation bias and over-reliance (Alon-Barkat and Busuioc, 2023; Klingbeil et al., 2024; Glickman
-and Sharot, 2025), and moves the measurement from outcomes to **process**. Students solve labs in an
-environment where AI is available but optional; the platform passively logs every prompt, reply, edit, run and
-submission as an immutable, timestamped event. The scores are then *pure functions of that event log*, which
-makes them reproducible and checkable.
+automation-bias and over-reliance literature (Alon-Barkat and Busuioc, 2023; Klingbeil et al., 2024; Glickman and
+Sharot, 2025). It moves measurement from **outcomes** to **process**:
 
-The two preliminary hypotheses we want to test:
+- Students solve labs where AI is available but optional.
+- Every prompt, reply, edit, run and submission is logged as an immutable, timestamped event.
+- The scores are *pure functions of that log*, so they are reproducible and checkable.
 
-1. Users with access to generative AI complete tasks faster but show lower cognitive independence than users
-   without it.
-2. Feedback on AI reliance changes users' cognitive independence over time.
+The numbers that make the case: 88% of UK undergraduates used generative AI for assessments in 2025 (up from 53% a
+year earlier, HEPI) and 84% of developers use or plan to use AI tools (Stack Overflow, 2025). Detectors judge text,
+proctoring treats AI as a crime, coding platforms grade output, and LMS tools count clicks. Nobody measures the collaboration.
 
-### What is measured
+**Our two hypotheses**
 
-Fourteen behavioural signals in three pillars. Each signal says *none, and why* when there is not enough
-evidence, rather than inventing a number.
+1. People with generative AI finish faster but show lower cognitive independence than people without it.
+2. Feedback on AI reliance changes cognitive independence over time.
+
+### 14 signals, 3 pillars
+
+Every signal says **"none, and why"** when it has no evidence. It never invents a number.
 
 | Pillar | Signals |
 |---|---|
-| **P1 · AI utilization**: how well is AI used? | S1.1 Help-seeking calibration · S1.2 Student grounding · S1.3 Response utilization · S1.4 Modification and verification · S1.5 Follow-up engagement · S1.6 Adaptive AI use |
-| **P2 · Cognitive engagement**: how actively does the student think? | S2.1 Independent initiation · S2.2 Reasoning continuity · S2.3 Problem-solving agency · S2.4 Evidence-based error recovery |
-| **P3 · Learning and knowledge development**: what is gained? | S3.1 Conceptual understanding · S3.2 Knowledge application · S3.3 Knowledge transfer · S3.4 Retention and recall |
+| 🤝 **P1 · AI utilization**: how well is AI used? | Help-seeking calibration · Student grounding · Response utilization · Modification and verification · Follow-up engagement · Adaptive AI use |
+| 🧩 **P2 · Cognitive engagement**: how actively do they think? | Independent initiation · Reasoning continuity · Problem-solving agency · Evidence-based error recovery |
+| 🌱 **P3 · Learning and knowledge development**: what sticks? | Conceptual understanding · Knowledge application · Knowledge transfer · Retention and recall |
 
-Most signals are deterministic (for example, how much of the student's own work came before the first AI
-question, or whether AI-written code was edited and then run). Three (S1.1, S1.2, S3.1) are scored by a language
-model against a written rubric. The overall CIQ is a provisional equal-weight average; its weighting is not yet
-validated.
+Most are deterministic (did you try before you asked? did you edit what the AI gave you, then run it?). Three are scored
+by a language model against a written rubric. The overall CIQ is a provisional equal-weight average, honestly labelled as such.
 
-### How far the evidence goes
+**Receipts.** A separate suite ([`validation/`](validation/)) found 53/53 known-answer trials exact, 10/10 "no evidence"
+cases returning *none*, 88/88 recomputations bit-identical, and the three model-scored signals agreeing with hand-labelled
+examples (Spearman r = 0.84 to 0.87). What it does *not* prove is that the signals predict real learning. That needs a study
+with students, which is the next step ([report](validation/report/VALIDATION_REPORT.pdf)).
 
-A separate validation suite ([`validation/`](validation/)) checks that the signals compute what they claim:
-
-- 53 of 53 known-answer trials match the value worked out by hand
-- 10 of 10 "no evidence" cases return *none*, never a made-up number
-- 88 of 88 recomputations of the same session are bit-identical
-- the three model-scored signals agree with hand-labelled examples (Spearman r = 0.84 to 0.87)
-
-What this does **not** show is that the signals predict real learning. That needs a study with students, which
-is the next step; see [validation/report/VALIDATION_REPORT.pdf](validation/report/VALIDATION_REPORT.pdf) for the
-methods and the limits.
-
-## What it looks like
+## 👀 Peek inside
 
 <table>
 <tr>
-<td width="50%"><img src="docs/img/ciq-score.jpg" alt="The CIQ score page"><br><sub><b>The student sees</b> their CIQ and the evidence behind each signal.</sub></td>
-<td width="50%"><img src="docs/img/teacher-report.jpg" alt="A lab report for the teacher"><br><sub><b>The teacher sees</b> who submitted, scores, and can open any student's real work.</sub></td>
+<td width="50%"><img src="docs/img/ciq-score.jpg" alt="The CIQ score page"><br><sub>🎓 <b>Students</b> see their CIQ and the evidence behind every signal.</sub></td>
+<td width="50%"><img src="docs/img/teacher-report.jpg" alt="A lab report"><br><sub>🧑‍🏫 <b>Teachers</b> see who submitted, the scores, and can open anyone's real work.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/img/teacher-class.jpg" alt="The teacher's class"><br><sub><b>Classes</b> follow courses, years, divisions and batches; a student can have several professors.</sub></td>
-<td width="50%"><img src="docs/img/admin-overview.jpg" alt="The administrator's overview"><br><sub><b>The administrator</b> runs the server from a browser, including the lab-mode switch.</sub></td>
+<td width="50%"><img src="docs/img/teacher-class.jpg" alt="A class by division and batch"><br><sub>🏫 <b>Classes</b> follow programme, year, division and batch, like a real college.</sub></td>
+<td width="50%"><img src="docs/img/admin-overview.jpg" alt="The admin overview"><br><sub>🛠️ <b>Admins</b> run the whole server from a browser tab.</sub></td>
 </tr>
 </table>
 
-The screens above use demonstration data. The full set is in the
-[walkthrough](docs/CAVY-Application-Walkthrough.pdf), and the design started as the
+Every screen is in the [walkthrough PDF](docs/CAVY-Application-Walkthrough.pdf) (demo data, scripted AI), and it all started as
 [Figma wireframes](https://www.figma.com/design/1rHhK4KU4ndumQBopIkcT1/CAVY-Platform-Wireframe?node-id=0-1).
 
-## What the platform does
+## 🎒 What it does
 
-- **Labs.** A professor creates a lab with three stages (Learning, Exploration, Assessment), each with its own
-  AI-assistance level, aimed at a course, year, division and batch. Students work through the stages in one
-  coding screen (Back and Next), explain their solution in their own words, and submit once. Practice mode is
-  separate and ungraded.
-- **Lab mode.** The lab opens full screen, switching apps is blocked where the operating system allows it,
-  leaving the window twice submits the lab, and pasted text is recorded and compared with what the AI wrote.
-  The administrator can switch it off.
-- **People and classes.** Only approved emails can sign up. Courses have an ID, a level, a department and years.
-  Professors choose the courses they teach, and every student of a course joins the class of each professor who
-  teaches it. First logins and password resets arrive by email.
-- **AI, your choice.** A local model (Ollama) works offline; hosted providers (OpenAI, Claude, Gemini, Grok,
-  Groq) work with a key. A student's own key stays in that computer's memory and is never sent to the server.
-- **One shared server.** A professor and many students on one network share live data. The same `CavyApi`
-  class serves the desktop app, the server and the tests.
-- **Installers** for macOS and Windows, built and smoke-tested by GitHub Actions.
+- 🧪 **Labs with three stages.** Learning, Exploration, Assessment, each with its own AI-assistance level. Back and Next
+  between stages, one submit at the end, and an "explain it in your own words" check before it closes.
+- 🔒 **Lab mode.** Full screen, key lock, one warning if you wander off, automatic submit the second time, and pasted text
+  is recorded (and compared with what the AI wrote). The admin can switch it off.
+- 🎓 **It speaks college.** Programmes (MSc and BSc in Data Science, Statistics and Data Science, Applied Statistics and
+  Analytics), **SAP IDs**, admission year, **divisions, batches and roll numbers**. The year of study and the semester follow
+  the calendar (the academic year starts on 1 July), so everyone moves up by themselves. Load a whole class from one
+  spreadsheet ([how](docs/COLLEGE_SETUP.md)).
+- 🔑 **Sign in with a SAP ID** (or an email), choose your own password at first login, and never retype your course or batch.
+- 🤖 **Bring your own AI.** A local model (Ollama) works offline; OpenAI, Claude, Gemini, Grok and Groq work with a key that
+  lives only in the student's computer memory.
+- 🏠 **One class server.** A professor and a room full of students share live data on one network, with a browser admin panel.
+- 🔔 **It tells you about updates.** A small notice when a newer version exists, and a server and its apps must run
+  **exactly the same version** or they politely refuse to talk ([how](docs/RELEASING.md)).
+- 📦 **Real installers** for macOS and Windows, built and smoke-tested by GitHub Actions.
 
-## Get it
+## 🚀 Try it in 60 seconds
 
-**Just use it.** Download the installer for your system from [Releases](https://github.com/ViralKariya-VK/eaal-platform/releases).
-The installers are not yet code-signed, so macOS and Windows will warn the first time; the release notes say how
-to open them. For a classroom, one computer runs the server and the others type its address; see
-[docs/DEMO_SETUP.md](docs/DEMO_SETUP.md).
+**Just use it.** Grab the installer for your system from [Releases](https://github.com/ViralKariya-VK/eaal-platform/releases).
+It is not code-signed yet, so your computer will frown once on first launch (the release notes say how to tell it you trust it).
+For a classroom: one computer hosts the server, everyone else types its address. Details in [docs/DEMO_SETUP.md](docs/DEMO_SETUP.md).
 
 **Run it from source.**
 
 ```bash
 conda create -n eaal-platform python=3.11
 conda activate eaal-platform
-python -m pip install -r requirements.lock      # the exact versions the tests run against
+python -m pip install -r requirements.lock     # the exact versions the tests run on
 python -m pip install -e . --no-deps
-python -m eaal_platform.app                      # the desktop app
-python -m eaal_platform.server                   # the classroom server (admin panel at /admin)
+python -m eaal_platform.app                     # the desktop app
+python -m eaal_platform.server                  # the class server (admin panel at /admin)
 ```
 
-Ollama is needed for the local assistant (`ollama serve`, then `ollama pull qwen3:8b`). The Monaco editor is
-fetched with `python scripts/fetch_monaco.py` (the app falls back to a plain text box without it). The first
-administrator password is created with `get-admin-password.command` (macOS) or `get-admin-password.bat`
-(Windows), or `python -m eaal_platform.server --reset-admin-password`.
+Want the local AI? `ollama serve`, then `ollama pull qwen3:8b`. Want the nice editor? `python scripts/fetch_monaco.py`
+(it politely falls back to a plain box without it). Lost your admin password?
+`get-admin-password.command` (Mac) or `get-admin-password.bat` (Windows) hands you a new one.
 
-## Updates
+## 🧱 Under the hood
 
-From version 0.2.0 the app tells you when a newer CAVY is released (one small notice, never during a lab) and
-links to the download. A server and the apps that connect to it must run exactly the same version, otherwise
-the connection is refused with a message saying which side to update, and hosting a server warns first when a
-newer version exists. How to publish an update (change the version, push a tag) is in
-[docs/RELEASING.md](docs/RELEASING.md).
-
-## How it is built
-
-Python backend, web front end, one native window. [pywebview](https://pywebview.flowrl.com/) shows the HTML
-front end in the system's web view and exposes a single Python object, `CavyApi`, to its JavaScript. FastAPI
-serves the classroom server and admin panel; SQLite (WAL) with SQLAlchemy 2 stores an append-only event log.
+Python on the inside, web on the outside, one native window. [pywebview](https://pywebview.flowrl.com/) shows the HTML front
+end in the system's web view and gives it a single Python object, `CavyApi`. FastAPI runs the class server and the admin
+panel; SQLite (WAL) with SQLAlchemy 2 keeps an append-only event log.
 
 ```
 src/eaal_platform/
-  api/       CavyApi: the one bridge every screen talks to
-  client/    the app's side: local data or a server, lab-mode lock-down
-  server/    FastAPI classroom server, email onboarding, the admin panel (admin_ui/)
-  db/        models, engine, accounts, courses, resources, approvals
+  api/       CavyApi: the one door every screen walks through
+  client/    local data or a server, lab-mode lock-down
+  server/    FastAPI class server, onboarding by email, the admin panel
+  db/        models, accounts, programmes, the academic calendar, the student-list importer
   signals/   the 14 CIQ signals, computed from the event log
-  events/    background, batched event logger
-  sandbox/   student code runs in a separate process with a time limit
-  ai/        provider interface; Ollama and hosted providers
-  web/       the front end (no build step)
-validation/  research: validation of the signals
-pilot_web/   research: the small web survey used for the pilot
-packaging/   PyInstaller, Inno Setup and dmg recipes
+  events/    background, batched event logger (typing never waits for the disk)
+  sandbox/   student code runs in its own process with a time limit
+  ai/        provider interface: Ollama and the hosted providers
+  web/       the front end (no build step, no framework drama)
+validation/  the research: do the signals measure what they claim?
 ```
 
-Why these choices (and the alternatives we weighed) are in the [software report](docs/Audit%20Report.pdf).
+Why each choice (and the alternatives we weighed) is in the [software report](docs/Audit%20Report.pdf).
 
-## Evidence that it works
+## 🧾 The receipts (quality)
 
 | | |
 |---|---|
-| Tests | 457 passing, 89% line and branch coverage (floor 70%) |
-| Static checks | Ruff 0 issues, mypy strict 0 errors, Bandit 0 findings, pip-audit clean on 151 pinned packages |
-| Complexity | average grade A (3.2); no block above 13 |
-| Mutation testing | 83% of mutants killed on the scoring engine |
-| Speed | 30 students at once: about 800 calls a second, none failed; 100 students: none failed ([details](docs/PERFORMANCE.md)) |
+| ✅ Tests | 550+ passing, 89% line and branch coverage |
+| 🧹 Static checks | Ruff 0, mypy strict 0, Bandit 0, pip-audit clean on 151 pinned packages |
+| 🧬 Mutation testing | 83% of mutants killed in the scoring engine |
+| ⚡ Speed | 30 students at once: about 800 calls a second, none failed; 100 students: none failed ([details](docs/PERFORMANCE.md)) |
+| 🔍 QA | a screen-by-screen audit at five window sizes, with fixes ([audit](docs/QA_AUDIT.md)) |
 
 ```bash
-ruff check . && ruff format --check .
-mypy src
-pytest                      # with the coverage gate
-radon cc src -s -n C        # complexity
+ruff check . && ruff format --check . && mypy src && pytest
 python scripts/benchmark.py --students 30
-python scripts/make_audit_report.py   # regenerates the software report
+python scripts/import_roster.py data/Students.xlsx --dry-run     # check a class list
 ```
 
 `pre-commit install` runs Ruff, mypy and a fast test subset on every commit.
 
-## Honest limits
+## 🐛 Known gremlins (we would rather tell you)
 
-- Traffic on the classroom network is plain HTTP; the installers are not code-signed.
-- `api/bridge.py` is one very large class and is the first thing to split.
-- Lab mode cannot block every operating-system escape (for example Ctrl+Alt+Del), and it has been checked most
-  on macOS; Windows needs more real-machine testing ([docs/WINDOWS_TESTING.md](docs/WINDOWS_TESTING.md)).
-- The signals are validated for correctness and repeatability on constructed cases, not yet against real
-  learning outcomes, and the CIQ weighting is provisional.
-- The weakest of the three model-scored signals, S3.1, once gave full marks to a line-by-line restatement of the
-  code; this is reported rather than hidden.
+- Traffic on the class network is plain HTTP, and the installers are not code-signed.
+- `api/bridge.py` is one very large class. It is next in line for a haircut.
+- Lab mode cannot block every escape hatch (Ctrl+Alt+Del says hello), and Windows needs more real-machine testing.
+- The signals are validated for correctness and repeatability on constructed cases, not yet against real learning outcomes.
+  One model-scored signal once gave full marks to a line-by-line restatement of the code. We reported it instead of hiding it.
 
-## Where this goes next
+## 🗺️ What is next
 
-A pilot in one real class (survey of students and professors, real event data), HTTPS and signed installers,
-splitting the bridge module, learning-system (LMS) integration, validating the signals against outcomes, and
-adaptive AI assistance that tightens or loosens help according to how a student is doing. See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+Subjects per semester and **teaching assignments** (which professor takes which batch for which practical), a lab given to
+both batches at once with a time for each, a "start the new academic year" button, HTTPS, signed installers, a pilot in one
+real class, and validating the signals against real outcomes. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## References
+## 👯 The squad
+
+**Group 04, NMIMS:** Viral Kariya · Vanshika Ahuja · Yashika Parmar · Carol Maria
+
+Shipping a new version? [docs/RELEASING.md](docs/RELEASING.md) is the short recipe.
+
+## 📚 Standing on the shoulders of
 
 - Ganuthula, V. R. R., and Balaraman, K. K. (2025). Artificial intelligence quotient framework for measuring human
   collaboration with artificial intelligence. *Discover Artificial Intelligence, 5*, 268.
-- Klingbeil, A., Grützner, C., and Schreck, P. (2024). Trust and reliance on AI: an experimental study on the extent
-  and costs of over-reliance on AI. *Computers in Human Behavior, 160*, 108352.
-- Alon-Barkat, S., and Busuioc, M. (2023). Human-AI interactions in public sector decision making: "automation bias"
-  and "selective adherence" to algorithmic advice. *Journal of Public Administration Research and Theory.*
-- Glickman, M., and Sharot, T. (2025). How human-AI feedback loops alter human perceptual, emotional and social
-  judgements. *Nature Human Behaviour, 9*(2), 345-359.
+- Klingbeil, A., Grützner, C., and Schreck, P. (2024). Trust and reliance on AI: an experimental study on the extent and
+  costs of over-reliance on AI. *Computers in Human Behavior, 160*, 108352.
+- Alon-Barkat, S., and Busuioc, M. (2023). Human-AI interactions in public sector decision making: "automation bias" and
+  "selective adherence" to algorithmic advice. *Journal of Public Administration Research and Theory.*
+- Glickman, M., and Sharot, T. (2025). How human-AI feedback loops alter human perceptual, emotional and social judgements.
+  *Nature Human Behaviour, 9*(2), 345-359.
 - Zheng, J., et al. (2025). Do students rely on AI? Analysis of student-ChatGPT conversations from a field study.
 - Higher Education Policy Institute (2025). *Student Generative AI Survey 2025.*
 - Stack Overflow (2025). *Developer Survey 2025.*

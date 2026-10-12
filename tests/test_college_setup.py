@@ -521,3 +521,200 @@ def test_the_admin_can_set_up_the_programmes(
 
     assert http.post("/admin/api/programmes/load", headers=headers).json() == {"added": 6}
     assert http.post("/admin/api/programmes/load", headers=headers).json() == {"added": 0}
+
+
+# -- the official list is the truth --------------------------------------------------------------
+
+
+def _directory(people: list[tuple[str, str, str, str]]) -> bytes:
+    rows: list[list[Any]] = [
+        ["SAP ID", "Email ID", "FirstName", "LastName", "DisplayName", "Password"]
+    ]
+    for sap, first, last, email in people:
+        rows.append([sap, email, first, last, f"{first} {last} - {sap}", "Shared#Start1"])
+    return _workbook({"MSc DS SEM I": rows})
+
+
+def test_the_official_list_is_read_without_its_shared_password() -> None:
+    people = roster.read_directory(
+        _directory([("86092500001", "ANUYA", "NALAVADE", "ANUYA.NALAVADE001@NMIMS.IN")]),
+        filename="d.xlsx",
+    )
+
+    assert [(p.sap_id, p.name, p.email) for p in people] == [
+        ("86092500001", "Anuya Nalavade", "anuya.nalavade001@nmims.in")
+    ]
+    assert not hasattr(people[0], "password")
+
+
+def test_matching_prefers_the_official_list_when_sheet_ids_are_wrong(
+    db_session_factory: Factory,
+) -> None:
+    people = roster.read_directory(
+        _directory(
+            [
+                ("86092500063", "YASHIKA", "PARMAR", "yashika.parmar063@nmims.in"),
+                ("86092500064", "SHATAKSHI", "PANDEY", "shatakshi.pandey064@nmims.in"),
+                ("86092500016", "SHRVANI", "THAKUR", "shrvani.thakur016@nmims.in"),
+                ("86092500090", "NO", "SHEETROW", "no.sheetrow090@nmims.in"),
+            ]
+        ),
+        filename="d.xlsx",
+    )
+    sheets = {
+        "MSc DS Div-A (Sem-III)": [
+            ["SAP ID", "Name", "Roll No"],
+            ["86092500016", "Shrawani Thakur", "A001"],  # spelt differently, SAP ID right
+            ["86092500063", "Yashika Parmar", "A002"],
+        ],
+        "MSc DS Div-B (Sem-III)": [
+            ["SAP ID", "Name", "Roll No"],
+            ["86092500063", "Shatakshi Pandey", "B001"],  # the sheet reused Yashika's number
+            ["86092500999", "Stranger Danger", "B002"],  # nobody on the list
+        ],
+    }
+    groups = roster.read_groups(_workbook(sheets), filename="x.xlsx")
+
+    unplaced, problems = roster.merge_directory(groups, people, programme="MSc Data Science")
+
+    assert [p.sap_id for p in unplaced] == ["86092500090"]
+    assert [p["name"] for p in problems] == ["Stranger Danger"]
+    rows = {r.name: (r.sap_id, r.email) for g in groups for r in g.rows}
+    assert rows["Shatakshi Pandey"] == ("86092500064", "shatakshi.pandey064@nmims.in")
+    assert rows["Shrvani Thakur"][0] == "86092500016"
+    assert rows["Yashika Parmar"][0] == "86092500063"
+
+
+def test_people_with_no_division_are_loaded_without_one(db_session_factory: Factory) -> None:
+    group = roster.Group(
+        "Official list (no division)",
+        "MSc Data Science",
+        None,
+        3,
+        None,
+        [roster.Row(0, "86092500090", "No Sheetrow", None, "no.sheetrow090@nmims.in")],
+        allow_unplaced=True,
+    )
+
+    plan = roster.build_plan(db_session_factory, [group], today=OCT_2026)
+    roster.apply_plan(db_session_factory, plan)
+
+    with db_session_factory() as db:
+        student = db.query(Student).one()
+        assert (student.division, student.batch, student.roll_number) == (None, None, None)
+        assert (student.year, student.email) == (2, "no.sheetrow090@nmims.in")
+
+
+def test_named_people_are_taken_out_to_become_teachers() -> None:
+    people = [
+        roster.Person("86092500001", "VIRAL", "KARIYA", "viral.kariya001@nmims.in"),
+        roster.Person("86092500002", "OTHER", "PERSON", "other.person002@nmims.in"),
+    ]
+
+    rest, taken = roster.split_out(people, ["viral kariya", "Nobody Here"])
+
+    assert [p.sap_id for p in rest] == ["86092500002"] and [p.sap_id for p in taken] == [
+        "86092500001"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "sap", "expected"),
+    [
+        ("Anuya Nalavade", "86092500001", "anuya.nalavade001@nmims.in"),
+        ("SHLOK AGRAWAL", "86032400039", "shlok.agrawal039@nmims.in"),
+        ("Keerthana Senthil Kumar", "86032400067", None),  # three words: not guessed
+        ("Shambhavi .", "86032400069", None),
+        ("Mono", "86032400001", None),
+    ],
+)
+def test_the_college_email_scheme_is_only_used_when_unambiguous(
+    name: str, sap: str, expected: str | None
+) -> None:
+    assert roster.derive_email(name, sap) == expected
+
+
+def test_derived_emails_are_flagged_and_never_shared(db_session_factory: Factory) -> None:
+    sheets = {
+        _SHEET: [
+            ["SAP ID", "Name", "Roll No"],
+            ["86092500001", "Same Name", "A001"],
+            ["86092500101", "Same Name", "A002"],
+        ]
+    }
+    plan = roster.build_plan(
+        db_session_factory,
+        roster.read_groups(_workbook(sheets), filename="x.xlsx"),
+        today=OCT_2026,
+        derive_emails=True,
+    )
+
+    emails = [s.email for s in plan.students]
+    assert emails == ["same.name001@nmims.in", "same.name101@nmims.in"]
+    assert any("worked out from the college's scheme" in n for n in plan.notes)
+
+    roster.apply_plan(db_session_factory, plan)
+    again = roster.build_plan(
+        db_session_factory,
+        roster.read_groups(
+            _workbook(
+                {_SHEET: [["SAP ID", "Name", "Roll No"], ["86092500777", "Same Name", "A003"]]}
+            ),
+            filename="x.xlsx",
+        ),
+        today=OCT_2026,
+    )
+    assert again.students[0].email is None
+
+
+# -- starting again --------------------------------------------------------------------------------
+
+
+def test_wiping_keeps_only_the_administrators_settings(
+    db_engine: Engine, db_session_factory: Factory
+) -> None:
+    from eaal_platform.db.bootstrap import create_student_account
+    from eaal_platform.db.maintenance import wipe_data
+    from eaal_platform.db.models import Admin, AppSetting, Task
+
+    seed_demo_content(db_session_factory)
+    create_student_account(
+        db_session_factory, display_name="S", email="s@x.com", password="hunter2-hunter2"
+    )
+    with db_session_factory() as db:
+        db.add(Admin(display_name="Root", email="r@x.com", password_hash="x"))
+        db.add(AppSetting(key="lab_mode", value="on"))
+        db.commit()
+
+    removed = wipe_data(db_engine)
+
+    assert removed["students"] == 1 and removed["tasks"] >= 3
+    with db_session_factory() as db:
+        assert db.query(Student).count() == 0 and db.query(Task).count() == 0
+        assert db.query(Admin).count() == 1 and db.query(AppSetting).count() == 1
+
+
+def test_a_backup_is_a_working_copy(tmp_path: Any) -> None:
+    import sqlite3
+
+    from eaal_platform.db.maintenance import backup_database
+
+    source = tmp_path / "server.db"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE t (x INTEGER)")
+        connection.execute("INSERT INTO t VALUES (42)")
+
+    copy = backup_database(source)
+
+    assert copy.parent == tmp_path / "backups" and "before-clean" in copy.name
+    assert sqlite3.connect(copy).execute("SELECT x FROM t").fetchone() == (42,)
+
+
+def test_a_classroom_server_starts_without_demo_labs(tmp_path: Any) -> None:
+    from eaal_platform.db.models import Task
+    from eaal_platform.server.host import build_state
+
+    state = build_state(tmp_path / "s.db")
+    with state.session_factory() as db:
+        assert [t.title for t in db.query(Task).all()] == ["Practice"]
+    state.engine.dispose()

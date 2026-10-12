@@ -181,6 +181,14 @@ def authenticate_professor(
         return professor.id, professor.display_name
 
 
+def seed_practice_task(session_factory: sessionmaker[OrmSession]) -> None:
+    """Make sure the Practice area exists (it is not a lab: no stages, no grading)."""
+    with session_factory() as db_session:
+        if db_session.query(Task).filter_by(title=PRACTICE_TASK_TITLE).first() is None:
+            db_session.add(Task(title=PRACTICE_TASK_TITLE))
+            db_session.commit()
+
+
 def seed_demo_content(session_factory: sessionmaker[OrmSession]) -> None:
     """Create the demo Labs (with stages) and the Practice task, if missing.
 
