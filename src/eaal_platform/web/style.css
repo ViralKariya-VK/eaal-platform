@@ -2592,6 +2592,15 @@ textarea:focus-visible {
 }
 
 /* My class: a scrolling, compact student table under the shared filter bar */
+.filter-bar button.ghost {
+  padding: 9px 18px;
+  font-size: 13px;
+  border-radius: var(--radius-control);
+}
+.filter-bar input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
 .filter-bar .filter-search {
   flex: 1.4;
   min-width: 190px;

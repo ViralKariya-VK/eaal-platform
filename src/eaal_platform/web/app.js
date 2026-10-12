@@ -2107,7 +2107,7 @@ function classFilterBar(students) {
     values.map((v) => `<option value="${escapeHtml(v)}"${v === current ? " selected" : ""}>${escapeHtml(label(v))}</option>`).join("");
   return `<div class="card filter-bar">
     <label class="filter-search">Search
-      <input type="search" id="classSearch" placeholder="Name, SAP ID or roll no." value="${escapeHtml(classFilter.q)}" />
+      <input type="text" id="classSearch" autocomplete="off" placeholder="Name, SAP ID or roll no." value="${escapeHtml(classFilter.q)}" />
     </label>
     <label>Course
       <select id="fCourse">${options(distinct((s) => s.course_label || s.course), classFilter.course, "All Courses")}</select>
