@@ -2041,47 +2041,38 @@ function showReportsList() {
   renderLabsScreen("reports", "Reports", "Select a lab to view its report.", "Reports", false);
 }
 
-// The class as a tree: course > year > division and batch, each with its students.
-function classTreeHtml(students, studentRow) {
-  const byKey = (list, key) => {
-    const groups = new Map();
-    list.forEach((item) => {
-      const k = key(item);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(item);
-    });
-    return [...groups.entries()];
-  };
-  const noCourse = "No course set";
-  const courses = byKey(students, (s) => s.course_label || s.course || noCourse).sort(([a], [b]) =>
-    a === noCourse ? 1 : b === noCourse ? -1 : a.localeCompare(b)
-  );
-  const average = (list) => {
-    const scores = list.map((s) => s.overall_ciq).filter((v) => v !== null);
-    return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-  };
-  const summary = (label, list, level) =>
-    `<summary class="tree-${level}"><span>${escapeHtml(label)}</span><span class="muted">${list.length} student${list.length === 1 ? "" : "s"}${average(list) === null ? "" : ` &middot; average CIQ ${average(list)}`}</span></summary>`;
-  const table = (list) => `
-    <div class="card tree-table"><table class="data-table">
-      <thead><tr><th>Name</th><th>SAP ID / email</th><th>Roll No.</th><th>Submitted</th><th>CIQ</th><th>Action</th></tr></thead>
-      <tbody>${list.sort((a, b) => a.name.localeCompare(b.name)).map(studentRow).join("")}</tbody>
-    </table></div>`;
-  return courses
-    .map(([course, inCourse]) => {
-      const years = byKey(inCourse, (s) => s.year || 0).sort(([a], [b]) => a - b);
-      return `<details class="tree-node" open>${summary(course, inCourse, "course")}
-        ${years
-          .map(([year, inYear]) => {
-            const groups = byKey(inYear, (s) => `${s.division ? "Division " + s.division : "No division"} · ${s.batch ? "Batch " + s.batch : "No batch"}`).sort(([a], [b]) => a.localeCompare(b));
-            return `<details class="tree-node tree-child" open>${summary(year ? [inYear[0].year_label, inYear[0].batch_of && `batch of ${inYear[0].batch_of}`, inYear[0].semester_label].filter(Boolean).join(" · ") : "Year not set", inYear, "year")}
-              ${groups.map(([label, list]) => `<div class="tree-group"><div class="tree-group-label">${escapeHtml(label)} <span class="muted">· ${list.length}</span></div>${table(list)}</div>`).join("")}
-            </details>`;
-          })
-          .join("")}
-      </details>`;
-    })
-    .join("");
+// "My class" is a filtered, scrolling table (course, division, batch, search) rather than a tree.
+const classFilter = { q: "", course: "", division: "", batch: "" };
+
+function classRows(students) {
+  const q = classFilter.q.trim().toLowerCase();
+  return students
+    .filter((s) => !classFilter.course || (s.course_label || s.course || "") === classFilter.course)
+    .filter((s) => !classFilter.division || s.division === classFilter.division)
+    .filter((s) => !classFilter.batch || String(s.batch) === classFilter.batch)
+    .filter(
+      (s) =>
+        !q ||
+        [s.name, s.sap_id, s.email, s.roll_number, s.enrollment_no].some((v) =>
+          String(v || "").toLowerCase().includes(q)
+        )
+    )
+    .sort((a, b) => (a.division || "~").localeCompare(b.division || "~") || (Number(a.roll_number) || 1e9) - (Number(b.roll_number) || 1e9) || a.name.localeCompare(b.name));
+}
+
+function classFilterBar(students) {
+  const distinct = (key) => [...new Set(students.map(key).filter(Boolean))].sort();
+  const options = (values, current, all, label = (v) => v) =>
+    `<option value="">${all}</option>` +
+    values.map((v) => `<option value="${escapeHtml(v)}"${v === current ? " selected" : ""}>${escapeHtml(label(v))}</option>`).join("");
+  return `<div class="class-filters">
+    <input type="search" id="classSearch" placeholder="Search name, SAP ID or roll no." value="${escapeHtml(classFilter.q)}" />
+    <select id="fCourse" aria-label="Course">${options(distinct((s) => s.course_label || s.course), classFilter.course, "All courses")}</select>
+    <select id="fDivision" aria-label="Division">${options(distinct((s) => s.division), classFilter.division, "All divisions", (v) => "Division " + v)}</select>
+    <select id="fBatch" aria-label="Batch">${options(distinct((s) => (s.batch ? String(s.batch) : "")), classFilter.batch, "Both batches", (v) => "Batch " + v)}</select>
+    <button class="ghost" id="clearClassFilters">Clear</button>
+    <span class="muted" id="classCount"></span>
+  </div>`;
 }
 
 function placeLine(item) {
@@ -2102,9 +2093,11 @@ function showStudents() {
     nextRefresh = null;
     const studentRow = (student) => `
       <tr>
-        <td><button class="link-button view-progress" data-student-id="${student.id}" title="See ${escapeHtml(student.name)}'s progress">${escapeHtml(student.name)}</button>${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
+        <td><button class="link-button view-progress" data-student-id="${student.id}" title="See ${escapeHtml(student.name)}'s progress">${escapeHtml(student.name)}</button>${student.must_change_password ? ` <span class="pill pill-amber" title="Has not chosen their own password yet">temp pw</span>` : ""}</td>
         <td>${escapeHtml(student.sap_id || student.email || "—")}</td>
         <td>${escapeHtml(student.roll_number || student.enrollment_no || "—")}</td>
+        <td>${escapeHtml(student.division || "—")}</td>
+        <td>${student.batch ? escapeHtml(student.batch) : "—"}</td>
         <td>${student.sessions_submitted}</td>
         <td>${
           student.overall_ciq === null
@@ -2116,7 +2109,6 @@ function showStudents() {
           <button class="ghost remove-student-button" data-student-id="${student.id}" data-name="${escapeHtml(student.name)}">Remove</button>
         </div></td>
       </tr>`;
-    const rows = classTreeHtml(students, studentRow);
     const addable = unassigned
       .map(
         (s) => `<label class="inline-check"><input type="checkbox" data-add="${s.id}" /> ${escapeHtml(s.name)} <span class="muted">${escapeHtml(placeLine(s))}${s.roll_number ? " · Roll " + escapeHtml(s.roll_number) : ""}</span></label>`
@@ -2137,10 +2129,16 @@ function showStudents() {
       </div>
       <button class="primary" id="chooseCourses">Choose courses</button>
     </div>
-    ${rows || `<div class="card"><p class="muted">Nobody in your class yet. Choose your courses above, or add a group or students below.</p></div>`}
-    <div class="page-heading" style="margin-top:28px;"><div><h2>Add a whole group</h2>
-      <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it joins your class. Students of that group who sign up later join automatically.</p></div></div>
-    <div class="card" id="groupCard">
+    ${
+      students.length
+        ? `${classFilterBar(students)}<div class="class-scroll"><table class="data-table">
+            <thead><tr><th>Name</th><th>SAP ID / email</th><th>Roll</th><th>Division</th><th>Batch</th><th>Subs</th><th>CIQ</th><th></th></tr></thead>
+            <tbody id="classBody"></tbody></table></div>`
+        : `<div class="card"><p class="muted">Nobody in your class yet. Choose your courses above, or add a group or students below.</p></div>`
+    }
+    <details class="card fold" style="margin-top:20px;"><summary><h2>Add a whole group</h2></summary>
+      <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it joins your class. Students of that group who sign up later join automatically.</p>
+    <div id="groupCard">
       ${
         myCourses.length
           ? `<div class="group-form">
@@ -2164,18 +2162,18 @@ function showStudents() {
                .join("")}</ul>`
           : ""
       }
-    </div>
-    <div class="page-heading" style="margin-top:28px;"><div><h2>Add individual students</h2>
+    </div></details>
+    <details class="card fold" style="margin-top:12px;"><summary><h2>Add individual students</h2></summary>
       <p class="subtitle">Students who aren't in your class yet${
         myCourses.length ? ", from the courses you teach" : ""
-      }. A student can be in several professors' classes, one for each subject.</p></div></div>
-    <div class="card">
+      }. A student can be in several professors' classes, one for each subject.</p>
+    <div>
       ${
         unassigned.length
           ? `<div class="check-list">${addable}</div><button class="primary" id="addToClass" style="margin-top:12px;">Add selected to my class</button>`
           : `<p class="muted">Everyone is already in your class. New students appear here after they sign up.</p>`
       }
-    </div>`,
+    </div></details>`,
       "students"
     );
     if (myCourses.length) {
@@ -2243,10 +2241,11 @@ function showStudents() {
       });
     }
     document.getElementById("chooseCourses").addEventListener("click", () => showTeachingCourses(false));
-    document.querySelectorAll(".view-progress").forEach((btn) => {
-      btn.addEventListener("click", () => showStudentProgress(Number(btn.dataset.studentId)));
-    });
-    document.querySelectorAll(".remove-student-button").forEach((btn) => {
+    const bindRows = () => {
+      document.querySelectorAll("#classBody .view-progress").forEach((btn) => {
+        btn.addEventListener("click", () => showStudentProgress(Number(btn.dataset.studentId)));
+      });
+    document.querySelectorAll("#classBody .remove-student-button").forEach((btn) => {
       btn.addEventListener("click", () => {
         confirmModal({
           title: `Remove ${btn.dataset.name} from your class?`,
@@ -2264,7 +2263,7 @@ function showStudents() {
         });
       });
     });
-    document.querySelectorAll(".reset-password-button").forEach((btn) => {
+    document.querySelectorAll("#classBody .reset-password-button").forEach((btn) => {
       btn.addEventListener("click", () => {
         const studentId = Number(btn.dataset.studentId);
         confirmModal({
@@ -2286,6 +2285,32 @@ function showStudents() {
         });
       });
     });
+    };
+    const body = document.getElementById("classBody");
+    const drawClass = () => {
+      const list = classRows(students);
+      body.innerHTML = list.length
+        ? list.map(studentRow).join("")
+        : `<tr><td colspan="8" class="muted" style="padding:18px;">No students match these filters.</td></tr>`;
+      document.getElementById("classCount").textContent = `${list.length} of ${students.length} students`;
+      bindRows();
+    };
+    if (body) {
+      drawClass();
+      const bindFilter = (id, key) =>
+        document.getElementById(id).addEventListener(key === "q" ? "input" : "change", (e) => {
+          classFilter[key] = e.target.value;
+          drawClass();
+        });
+      bindFilter("classSearch", "q");
+      bindFilter("fCourse", "course");
+      bindFilter("fDivision", "division");
+      bindFilter("fBatch", "batch");
+      document.getElementById("clearClassFilters").addEventListener("click", () => {
+        Object.assign(classFilter, { q: "", course: "", division: "", batch: "" });
+        showStudents();
+      });
+    }
   });
 }
 
@@ -2481,7 +2506,7 @@ function renderCreateSession(existing, courses) {
           </select>
         </label>
         <label class="span-2">Description
-          <textarea id="sessionDescription" rows="4" placeholder="Describe the problem students will solve..."></textarea>
+          <textarea id="sessionDescription" rows="4" placeholder="Describe the problem only. Students see it when the assessment starts."></textarea>
         </label>
         <div class="span-2 ai-draft-row"><button class="ghost" id="draftDescription" type="button">${icon("sparkle")}Draft with AI</button><span class="muted" id="draftStatus">Write a few words about the problem first, or leave it empty to use just the title and topic.</span></div>
       </div>
@@ -3326,6 +3351,9 @@ function showWorkspace(info) {
   const pills = [`<span class="pill pill-amber">${icon("sparkle")}${MODE_LABELS[info.ai_assistance_mode] || info.ai_assistance_mode}</span>`];
   if (info.stage_type) {
     pills.unshift(`<span class="pill pill-neutral">${STAGE_LABELS[info.stage_type] || info.stage_type}</span>`);
+  }
+  if (info.topic) {
+    pills.push(`<span class="pill pill-neutral">Topic: ${escapeHtml(info.topic)}</span>`);
   }
   if (info.difficulty) {
     pills.push(`<span class="pill pill-neutral">${icon("clock")}Difficulty: ${escapeHtml(info.difficulty)}</span>`);

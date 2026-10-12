@@ -516,3 +516,20 @@ def test_a_follow_up_needs_a_title_and_a_sensible_time(api: tuple[CavyApi, dict[
     assert cavy.create_followup_assessment({**base, "duration_minutes": -3})["ok"] is False
     assert cavy.get_followup_assessments(task_id) == []
     assert cavy.create_followup_assessment(base)["ok"] is True
+
+
+def test_the_problem_is_shown_only_when_the_assessment_starts(
+    api: tuple[CavyApi, dict[str, Any]],
+) -> None:
+    cavy, _ = api
+    task_id = _create(cavy)
+    _as(cavy, "student", "asha@example.com")
+    stages = cavy.get_stages(task_id)["stages"]
+    seen = {s["stage_type"]: cavy.start_stage(s["id"]) for s in stages}
+
+    for early in ("LEARNING", "EXPLORATION"):
+        assert seen[early]["task_description"] is None
+        assert seen[early]["difficulty"] is None
+        assert seen[early]["topic"] == "Sorting"
+    assert seen["ASSESSMENT"]["task_description"] == "Sort a list"
+    assert seen["ASSESSMENT"]["difficulty"] == "Medium"

@@ -2544,3 +2544,48 @@ textarea:focus-visible {
     max-width: none;
   }
 }
+
+/* My class: filter bar and a scrolling, compact student table */
+.class-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.class-filters input[type="search"] {
+  flex: 1 1 220px;
+  max-width: 300px;
+}
+.class-filters select {
+  width: auto;
+  max-width: 200px;
+}
+.class-scroll {
+  max-height: calc(100vh - 380px);
+  min-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+}
+.class-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--cream-50, #fff);
+}
+.class-scroll td,
+.class-scroll th {
+  padding: 6px 8px;
+}
+.class-scroll tbody tr {
+  height: 46px;
+}
+details.fold > summary {
+  cursor: pointer;
+  list-style: none;
+}
+details.fold > summary h2 {
+  display: inline;
+  margin: 0;
+}

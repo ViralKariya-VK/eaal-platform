@@ -1377,6 +1377,7 @@ class CavyApi:
                 .order_by(CodeSnapshot.id.desc())
                 .first()
             )
+            reveals_problem = stage.stage_type == StageType.ASSESSMENT
             files = {_ENTRY_FILENAME: task.starter_code or ""}
             if resumed and latest is not None:
                 files = {**files, **_unbundle_files(latest.content)}
@@ -1386,13 +1387,15 @@ class CavyApi:
                 "session_id": session_id,
                 "stage_id": stage.id,
                 "task_title": f"{task.title} — {stage.stage_type.value.title()}",
-                "task_description": task.description,
+                # The problem itself is revealed only when the assessment begins.
+                "task_description": task.description if reveals_problem else None,
+                "topic": task.learning_objective,
                 "starter_files": files,
                 "resumed": resumed,
                 "elapsed_seconds": _seconds_since(started_at) if resumed else 0,
                 "ai_assistance_mode": stage.ai_assistance_mode.value,
                 "is_stage": True,
-                "difficulty": task.difficulty,
+                "difficulty": task.difficulty if reveals_problem else None,
                 "duration_minutes": stage.duration_minutes,
                 "stage_type": stage.stage_type.value,
                 "task_id": task.id,
