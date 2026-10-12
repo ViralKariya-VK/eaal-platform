@@ -259,7 +259,7 @@ function autoRefresh(section, render, seconds = 4) {
   refreshTimer = setInterval(() => {
     const active = document.querySelector("[data-nav].active");
     if (!active || active.dataset.nav !== section) return clearInterval(refreshTimer);
-    if (document.querySelector(".overlay") || document.hidden) return; // don't disturb dialogs
+    if (document.querySelector(".overlay, details[open]") || document.hidden) return; // don't disturb dialogs or an open menu
     const el = document.activeElement;
     if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
     const scroll = main().scrollTop;
@@ -563,43 +563,116 @@ function showImportReport(filename, report) {
 
 // -- users --------------------------------------------------------------------
 
+// What the Users page is filtered by; kept between refreshes so a search is not lost.
+// A "More" menu closes when you click anywhere else (one listener for the whole page).
+document.addEventListener("click", (e) => {
+  document.querySelectorAll("details.more[open]").forEach((d) => {
+    if (!d.contains(e.target)) d.removeAttribute("open");
+  });
+});
+
+const userFilter = { q: "", programme: "", batchOf: "", division: "", batch: "", status: "" };
+
 function showUsers(quiet) {
   return guarded(async () => {
     const data = await get("/users");
+    const byKey = {};
+    data.students.forEach((u) => (byKey[`student:${u.id}`] = u));
+    data.professors.forEach((u) => (byKey[`professor:${u.id}`] = u));
     const status = (u) =>
       (u.online ? '<span class="pill ok">online</span> ' : "") +
       (u.disabled ? '<span class="pill bad">disabled</span> ' : "") +
-      (u.must_change_password ? '<span class="pill warn">must change password</span>' : "");
+      (u.must_change_password ? '<span class="pill warn">first login due</span>' : "");
     const teacherCell = (u) => {
       const names = (u.professor_ids || []).map((id) => (data.professors.find((p) => p.id === id) || {}).name).filter(Boolean);
       return `${names.length ? esc(names.join(", ")) : '<span class="muted">none</span>'} <button class="link" data-teachers="${u.id}">Change</button>`;
     };
-    const row = (role) => (u) => [
-      u.id,
-      esc(u.name),
-      esc([u.sap_id, u.email].filter(Boolean).join(" · ")) || '<span class="muted">none</span>',
-      role === "student" ? placeText(u) : `${u.students} students · ${u.resources} shared`,
-      role === "student" ? teacherCell(u) : esc((u.courses || []).join(", ") || "No courses"),
-      role === "student" ? u.sessions : "",
+    const actions = (role, u) => `<div class="row-actions"><button data-edit="${role}:${u.id}">Edit</button>
+      <details class="more"><summary aria-label="More actions for ${esc(u.name)}">More</summary><div class="menu">
+        <button data-reset="${role}:${u.id}" data-name="${esc(u.name)}">Reset password</button>
+        <button data-toggle="${role}:${u.id}" data-disabled="${u.disabled}" data-name="${esc(u.name)}">${u.disabled ? "Enable" : "Disable"}</button>
+        <button class="danger" data-delete="${role}:${u.id}" data-name="${esc(u.name)}">Delete</button></div></details></div>`;
+    const who = (u) => `<b>${esc(u.name)}</b><div class="muted small">${esc([u.sap_id, u.email].filter(Boolean).join(" · ")) || "no SAP ID or email"}</div>`;
+    const professorRow = (u) => [
+      who(u),
+      `${u.students} students · ${u.resources} shared`,
+      esc((u.courses || []).join(", ") || "No courses"),
       status(u),
-      `<div class="row-actions"><button data-edit="${role}:${u.id}">Edit</button> <button data-reset="${role}:${u.id}" data-name="${esc(u.name)}">Reset password</button>
-       <button data-toggle="${role}:${u.id}" data-disabled="${u.disabled}" data-name="${esc(u.name)}">${u.disabled ? "Enable" : "Disable"}</button>
-       <button class="danger" data-delete="${role}:${u.id}" data-name="${esc(u.name)}">Delete</button></div>`,
+      actions("professor", u),
     ];
-    const byKey = {};
-    data.students.forEach((u) => (byKey[`student:${u.id}`] = u));
-    data.professors.forEach((u) => (byKey[`professor:${u.id}`] = u));
+    const studentRow = (u) => [
+      who(u),
+      esc(u.course_label ? u.course_label.replace(/ \(CRS-\d+\)$/, "") : "—") +
+        `<div class="muted small">${esc([u.batch_of, u.completed ? "Completed" : [u.year_label, u.semester_label].filter(Boolean).join(" · ")].filter(Boolean).join(" · "))}</div>`,
+      esc(u.division ? [`Div ${u.division}`, u.batch && `Batch ${u.batch}`, u.roll_number].filter(Boolean).join(" · ") : u.roll_number || "No division"),
+      teacherCell(u),
+      status(u),
+      actions("student", u),
+    ];
+    const distinct = (key) => [...new Set(data.students.map((u) => u[key]).filter(Boolean))].sort();
+    const select = (id, label, values, current) =>
+      `<select id="${id}" aria-label="${label}"><option value="">${label}</option>${values.map((v) => `<option ${v === current ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
+    const matches = (u) => {
+      const f = userFilter;
+      if (f.programme && (u.course_label || u.course) !== f.programme) return false;
+      if (f.batchOf && u.batch_of !== f.batchOf) return false;
+      if (f.division && u.division !== f.division) return false;
+      if (f.batch && u.batch !== f.batch) return false;
+      if (f.status === "pending" && !u.must_change_password) return false;
+      if (f.status === "disabled" && !u.disabled) return false;
+      if (f.status === "online" && !u.online) return false;
+      if (f.status === "unplaced" && u.division) return false;
+      const hay = [u.name, u.sap_id, u.email, u.roll_number].filter(Boolean).join(" ").toLowerCase();
+      return f.q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+    };
+    const sortKey = (u) => [u.course || "~", u.division || "~", String(u.roll_number || "~").padStart(6, "0"), u.name].join("|");
+
     main().innerHTML = `
       <div class="page-head"><div><h1>Users</h1>
-      <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student can be in several teachers' classes (one per subject); each teacher can share resources with their own students and manage them. Accounts you add here don't need an approved email; people signing up themselves do (see Approved emails).</p></div>
+      <p class="muted">${data.students.length} students · ${data.professors.length} professors. Disabling keeps a person's history but blocks sign-in. A student can be in several teachers' classes (one per subject). Accounts you add here don't need an approved email; people signing up themselves do.</p></div>
       <button class="primary" id="newUser">Add account</button></div>
+      <div class="card"><div class="page-head" style="margin:0 0 10px"><h3 id="studentsTitle">Students</h3><span class="muted" id="studentsCount"></span></div>
+        <div class="toolbar filters">
+          <input id="userSearch" type="search" placeholder="Search name, SAP ID, email or roll no." aria-label="Search students" value="${esc(userFilter.q)}" />
+          ${select("fProgramme", "All programmes", distinct("course_label"), userFilter.programme)}
+          ${select("fBatchOf", "All batches of", distinct("batch_of"), userFilter.batchOf)}
+          ${select("fDivision", "All divisions", distinct("division"), userFilter.division)}
+          ${select("fBatch", "All batches", distinct("batch"), userFilter.batch)}
+          <select id="fStatus" aria-label="Status"><option value="">Any status</option>
+            ${[["pending", "First sign-in pending"], ["online", "Online now"], ["disabled", "Disabled"], ["unplaced", "No division"]].map(([v, l]) => `<option value="${v}" ${v === userFilter.status ? "selected" : ""}>${l}</option>`).join("")}</select>
+          <button id="clearFilters">Clear</button>
+        </div>
+        <div class="scroll-table" id="studentsBox"></div></div>
       <div class="card"><h3>Professors (${data.professors.length})</h3>
-        ${table(["ID", "Name", "SAP ID / email", "Class", "Teaches", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
-      <div class="card"><h3>Students (${data.students.length})</h3>
-        ${table(["ID", "Name", "SAP ID / email", "Programme · batch · year · semester · division · batch · roll", "Teachers", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
+        ${table(["Professor", "Class", "Teaches", "Status", ""], data.professors.map(professorRow), { empty: "No professors yet. Teachers sign up with an approved email." })}</div>`;
 
+    const scope = main();
+    const box = document.getElementById("studentsBox");
+    const drawStudents = () => {
+      const list = data.students.filter(matches).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+      document.getElementById("studentsCount").textContent = `Showing ${list.length} of ${data.students.length}`;
+      box.innerHTML = list.length
+        ? table(["Student", "Programme · batch of · year", "Div · batch · roll", "Teachers", "Status", ""], list.map(studentRow))
+        : '<p class="muted" style="padding:14px">No student matches these filters.</p>';
+      bind(box);
+    };
+    const filters = { userSearch: "q", fProgramme: "programme", fBatchOf: "batchOf", fDivision: "division", fBatch: "batch", fStatus: "status" };
+    Object.entries(filters).forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      el.addEventListener(id === "userSearch" ? "input" : "change", () => {
+        userFilter[key] = el.value;
+        drawStudents();
+      });
+    });
+    document.getElementById("clearFilters").addEventListener("click", () => {
+      Object.keys(userFilter).forEach((k) => (userFilter[k] = ""));
+      Object.keys(filters).forEach((id) => (document.getElementById(id).value = ""));
+      drawStudents();
+    });
     document.getElementById("newUser").addEventListener("click", () => userForm(null));
-    main().querySelectorAll("[data-teachers]").forEach((button) =>
+
+    function bind(scope) {
+    scope.querySelectorAll("[data-teachers]").forEach((button) =>
       button.addEventListener("click", () => {
         const student = byKey[`student:${button.dataset.teachers}`];
         modal(
@@ -625,10 +698,10 @@ function showUsers(quiet) {
         );
       })
     );
-    main().querySelectorAll("[data-edit]").forEach((b) =>
+    scope.querySelectorAll("[data-edit]").forEach((b) =>
       b.addEventListener("click", () => userForm({ role: b.dataset.edit.split(":")[0], ...byKey[b.dataset.edit] }))
     );
-    main().querySelectorAll("[data-toggle]").forEach((b) =>
+    scope.querySelectorAll("[data-toggle]").forEach((b) =>
       b.addEventListener("click", () => {
         const [role, id] = b.dataset.toggle.split(":");
         const disabling = b.dataset.disabled !== "true";
@@ -641,7 +714,7 @@ function showUsers(quiet) {
         else go().catch((e) => toast(e.message));
       })
     );
-    main().querySelectorAll("[data-delete]").forEach((b) =>
+    scope.querySelectorAll("[data-delete]").forEach((b) =>
       b.addEventListener("click", () => {
         const [role, id] = b.dataset.delete.split(":");
         confirmBox(`Delete ${b.dataset.name}?`, "This permanently removes the account. Students who have recorded work cannot be deleted; disable them instead.", "Delete account", async () => {
@@ -651,7 +724,7 @@ function showUsers(quiet) {
         });
       })
     );
-    main().querySelectorAll("[data-reset]").forEach((button) =>
+    scope.querySelectorAll("[data-reset]").forEach((button) =>
       button.addEventListener("click", () => {
         const [role, id] = button.dataset.reset.split(":");
         confirmBox(`Reset password for ${button.dataset.name}?`, "Their current password stops working immediately and they are signed out.", "Reset password", async () => {
@@ -666,6 +739,9 @@ function showUsers(quiet) {
         });
       })
     );
+    }
+    bind(scope.querySelectorAll(".card")[1]); // the professors
+    drawStudents();
     if (!quiet) autoRefresh("users", showUsers, 6);
   });
 }

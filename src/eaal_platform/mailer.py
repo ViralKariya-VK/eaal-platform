@@ -26,6 +26,22 @@ log = get_logger(__name__)
 DEFAULT_HOST = "smtp.gmail.com"
 DEFAULT_PORT = 587
 SMTP_TIMEOUT_SECONDS = 20
+
+
+def _tls_context() -> ssl.SSLContext:
+    """A TLS context that trusts the mail provider's certificate.
+
+    A packaged app (and some Python installs, notably conda on a Mac) has no system list of trusted
+    certificate authorities, so the default context fails with "unable to get local issuer
+    certificate". The ``certifi`` bundle that ships with the app's HTTP library fixes that.
+    """
+    try:
+        import certifi
+    except ImportError:  # no bundle available: fall back to the system's own list
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 _LOCAL_HOSTS = ("localhost", "127.0.0.1")
 
 
@@ -124,7 +140,7 @@ def send_mail(
         if settings.port == 465:
             factory = smtp_factory or (
                 lambda host, port: smtplib.SMTP_SSL(
-                    host, port, timeout=SMTP_TIMEOUT_SECONDS, context=ssl.create_default_context()
+                    host, port, timeout=SMTP_TIMEOUT_SECONDS, context=_tls_context()
                 )
             )
             with factory(settings.host, settings.port) as smtp:
@@ -140,7 +156,7 @@ def send_mail(
                 smtp.send_message(message)
                 return
             smtp.ehlo()
-            smtp.starttls(context=ssl.create_default_context())
+            smtp.starttls(context=_tls_context())
             smtp.ehlo()
             smtp.login(settings.username, settings.password)
             smtp.send_message(message)

@@ -418,3 +418,24 @@ def test_the_sign_up_lists_also_refuse_a_different_server_version() -> None:
         backend.get_academic_options()
     with pytest.raises(VersionMismatchError):
         backend.get_signup_info()
+
+
+def test_mail_trusts_the_bundled_certificate_authorities(monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+    import ssl
+
+    from eaal_platform import mailer
+
+    context = mailer._tls_context()
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    assert context.cert_store_stats()["x509_ca"] > 0  # the certifi list, not an empty store
+
+    real_import = builtins.__import__
+
+    def no_certifi(name: str, *args: object, **kwargs: object) -> object:
+        if name == "certifi":
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", no_certifi)
+    assert mailer._tls_context().verify_mode == ssl.CERT_REQUIRED  # falls back, still verifying
