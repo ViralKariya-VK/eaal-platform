@@ -41,7 +41,7 @@ from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
 from eaal_platform.buildinfo import VERSION
-from eaal_platform.db import academics, app_settings, approval_import, approvals, roster
+from eaal_platform.db import academics, app_settings, approval_import, approvals, roster, teaching
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     create_professor_account,
@@ -228,6 +228,19 @@ class EmailTestRequest(BaseModel):
 
 class IdRequest(BaseModel):
     id: int
+
+
+class SubjectRequest(BaseModel):
+    course_id: int
+    semester: int
+    name: str
+
+
+class AssignmentRequest(BaseModel):
+    professor_id: int
+    subject_id: int
+    division: str
+    batch: str | None = None
 
 
 class UpdateUserRequest(UserRef):
@@ -840,6 +853,74 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
             lambda: academics.set_professor_courses(
                 state.session_factory, request.professor_id, request.course_ids
             ),
+        )
+
+    def teaching_action(
+        admin: _AdminSession, action: str, detail: str, work: Any
+    ) -> dict[str, Any]:
+        try:
+            result = work()
+        except teaching.TeachingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(admin, action, detail)
+        state.bump(TOPIC_ACCOUNTS)
+        return {"ok": True, "result": result}
+
+    @router.get("/teaching")
+    def teaching_overview(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        return teaching.overview(state.session_factory)
+
+    @router.post("/teaching/subjects/add")
+    def subject_add(
+        request: SubjectRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return teaching_action(
+            admin,
+            "add_subject",
+            f"course#{request.course_id} sem {request.semester} {request.name}",
+            lambda: teaching.add_subject(
+                state.session_factory, request.course_id, request.semester, request.name
+            ),
+        )
+
+    @router.post("/teaching/subjects/remove")
+    def subject_remove(
+        request: IdRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return teaching_action(
+            admin,
+            "remove_subject",
+            f"#{request.id}",
+            lambda: teaching.remove_subject(state.session_factory, request.id),
+        )
+
+    @router.post("/teaching/assign")
+    def teaching_assign(
+        request: AssignmentRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return teaching_action(
+            admin,
+            "assign_teaching",
+            f"professor#{request.professor_id} subject#{request.subject_id} "
+            f"div {request.division} batch {request.batch or 'both'}",
+            lambda: teaching.assign(
+                state.session_factory,
+                request.professor_id,
+                request.subject_id,
+                request.division,
+                request.batch or None,
+            ),
+        )
+
+    @router.post("/teaching/unassign")
+    def teaching_unassign(
+        request: IdRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        return teaching_action(
+            admin,
+            "unassign_teaching",
+            f"#{request.id}",
+            lambda: teaching.unassign(state.session_factory, request.id),
         )
 
     @router.post("/signed-in/{client_id}/sign-out")

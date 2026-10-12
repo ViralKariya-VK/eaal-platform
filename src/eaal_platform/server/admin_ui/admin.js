@@ -202,6 +202,7 @@ const SECTIONS = [
   ["approved", "Approved emails", showApproved],
   ["users", "Users", showUsers],
   ["courses", "Courses & classes", showCourses],
+  ["teaching", "Teaching", showTeaching],
   ["labs", "Labs", showLabs],
   ["resources", "Resources", showResources],
   ["database", "Database", showDatabase],
@@ -1204,6 +1205,92 @@ async function manageCourse(courseId) {
     }
   );
   return overlay;
+}
+
+// -- teaching: who teaches which subject to which division and batch -----------------
+
+function showTeaching() {
+  return guarded(async () => {
+    const data = await get("/teaching");
+    const bySubject = (id) => data.subjects.find((s) => s.id === id);
+    const rows = data.assignments.map((a) => {
+      const subject = bySubject(a.subject_id);
+      return [
+        `<b>${esc(a.professor)}</b>`,
+        subject ? `${esc(subject.name)} <span class="muted">· ${esc(subject.course)}, Sem ${subject.semester}</span>` : "?",
+        `Division ${esc(a.division)}`,
+        a.batch ? `Batch ${esc(a.batch)}` : "Both batches",
+        `<button class="ghost" data-unassign="${a.id}">Remove</button>`,
+      ];
+    });
+    const subjectOptions = data.subjects
+      .map((s) => `<option value="${s.id}">${esc(s.course)} · Sem ${s.semester} · ${esc(s.name)}</option>`)
+      .join("");
+    main().innerHTML = `
+      <div class="page-head"><div><h1>Teaching</h1>
+        <p class="muted">Allot a subject, a division and a batch to a professor. Their class fills with the students who are in that semester now, and with each new set of students when they reach it. Only administrators do this; the allotment stays from year to year.</p></div></div>
+      <div class="card"><h3>Allot a subject</h3>
+        ${
+          data.professors.length && data.subjects.length
+            ? `<div class="toolbar filters">
+                <select id="tProf">${data.professors.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>
+                <select id="tSubject">${subjectOptions}</select>
+                <select id="tDivision"></select>
+                <select id="tBatch"></select>
+                <button class="primary" id="tAssign">Allot</button></div>`
+            : `<p class="muted">${data.professors.length ? "Add a subject first." : "No professors have signed up yet."}</p>`
+        }</div>
+      <div class="card"><h3>Allotments (${data.assignments.length})</h3>
+        ${table(["Professor", "Subject", "Division", "Batch", ""], rows, { empty: "Nothing allotted yet." })}</div>
+      <div class="card"><h3>Subjects</h3>
+        ${table(
+          ["Course", "Semester", "Subject", ""],
+          data.subjects.map((s) => [esc(s.course), `Sem ${s.semester}`, esc(s.name), `<button class="ghost" data-rm-subject="${s.id}">Remove</button>`]),
+          { empty: "No subjects yet." }
+        )}
+        <div class="toolbar filters" style="margin-top:10px">
+          <select id="sCourse"></select>
+          <input type="number" id="sSem" min="1" max="6" value="1" style="width:90px" aria-label="Semester" />
+          <input type="text" id="sName" placeholder="Subject name" />
+          <button class="ghost" id="sAdd">Add subject</button></div></div>`;
+    const courses = await get("/courses");
+    document.getElementById("sCourse").innerHTML = courses.courses.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+    const refill = () => {
+      const select = document.getElementById("tSubject");
+      if (!select) return;
+      const subject = bySubject(Number(select.value));
+      const opts = (list, first) => (first ? `<option value="">${first}</option>` : "") + list.map((v) => `<option value="${esc(v)}">${first ? "Batch " : "Division "}${esc(v)}</option>`).join("");
+      document.getElementById("tDivision").innerHTML = opts(subject.divisions, "");
+      document.getElementById("tBatch").innerHTML = opts(subject.batches, "Both batches");
+    };
+    refill();
+    const subjectSelect = document.getElementById("tSubject");
+    if (subjectSelect) subjectSelect.addEventListener("change", refill);
+    const act = async (path, body, message) => {
+      try {
+        const r = await post(path, body);
+        toast(r.result && r.result.added_students ? `${message} ${r.result.added_students} students joined their class.` : message);
+      } catch (err) {
+        toast(err.message);
+      }
+      showTeaching();
+    };
+    const assign = document.getElementById("tAssign");
+    if (assign)
+      assign.addEventListener("click", () =>
+        act("/teaching/assign", {
+          professor_id: Number(document.getElementById("tProf").value),
+          subject_id: Number(document.getElementById("tSubject").value),
+          division: document.getElementById("tDivision").value,
+          batch: document.getElementById("tBatch").value || null,
+        }, "Allotted.")
+      );
+    document.querySelectorAll("[data-unassign]").forEach((b) => b.addEventListener("click", () => act("/teaching/unassign", { id: Number(b.dataset.unassign) }, "Removed. Students already in the class stay.")));
+    document.querySelectorAll("[data-rm-subject]").forEach((b) => b.addEventListener("click", () => act("/teaching/subjects/remove", { id: Number(b.dataset.rmSubject) }, "Subject removed.")));
+    document.getElementById("sAdd").addEventListener("click", () =>
+      act("/teaching/subjects/add", { course_id: Number(document.getElementById("sCourse").value), semester: Number(document.getElementById("sSem").value), name: document.getElementById("sName").value }, "Subject added.")
+    );
+  });
 }
 
 // -- labs ---------------------------------------------------------------------

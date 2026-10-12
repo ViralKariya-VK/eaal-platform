@@ -36,7 +36,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.auth import generate_temporary_password, hash_password
 from eaal_platform.db import academic_calendar as cal
-from eaal_platform.db import academics
+from eaal_platform.db import academics, teaching
 from eaal_platform.db.models import Course, CourseOption, Student
 
 # name, years, level, department
@@ -594,6 +594,7 @@ def load_programmes(session_factory: sessionmaker[OrmSession]) -> int:
             if db.query(Course).filter(Course.name == name).first() is None:
                 academics.add_course(session_factory, name, years, level, department)
                 added += 1
+    teaching.load_default_subjects(session_factory)
     return added
 
 

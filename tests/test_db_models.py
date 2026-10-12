@@ -54,6 +54,8 @@ def test_every_table_has_synced_at_column(db_engine: Engine) -> None:
             "class_members",
             "app_settings",
             "professor_classes",
+            "subjects",
+            "teaching_assignments",
         )
         if table_name in server_only or table_name.startswith("resource"):
             continue  # newer tables: the per-row sync design is no longer used

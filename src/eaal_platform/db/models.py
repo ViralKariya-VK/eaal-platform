@@ -265,6 +265,35 @@ class ProfessorCourse(Base):
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), primary_key=True)
 
 
+class Subject(Base):
+    """A subject of a programme in one semester (semester 1-6 counted from admission)."""
+
+    __tablename__ = "subjects"
+    __table_args__ = (UniqueConstraint("course_id", "semester", "name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    semester: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
+class TeachingAssignment(Base):
+    """An administrator lets a professor teach a subject to a division and batch.
+
+    ``batch`` of ``None`` means both batches of the division. The assignment stays from year to
+    year: each new set of students that reaches the subject's semester joins the professor's class.
+    """
+
+    __tablename__ = "teaching_assignments"
+    __table_args__ = (UniqueConstraint("professor_id", "subject_id", "division", "batch"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    professor_id: Mapped[int] = mapped_column(ForeignKey("professors.id"), nullable=False)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    division: Mapped[str] = mapped_column(String(50), nullable=False)
+    batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
 class ProfessorClass(Base):
     """A group a professor has taken into their class: a course, narrowed by year/division/batch.
 

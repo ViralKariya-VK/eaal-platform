@@ -537,6 +537,10 @@ def sync_student_years(session_factory: sessionmaker[OrmSession], today: date | 
         db.commit()
     for student_id in moved:
         assign_by_groups(session_factory, student_id)
+    if moved:
+        from eaal_platform.db import teaching
+
+        teaching.sync(session_factory)
     return len(moved)
 
 

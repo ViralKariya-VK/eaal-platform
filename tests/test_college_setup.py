@@ -718,3 +718,79 @@ def test_a_classroom_server_starts_without_demo_labs(tmp_path: Any) -> None:
     with state.session_factory() as db:
         assert [t.title for t in db.query(Task).all()] == ["Practice"]
     state.engine.dispose()
+
+
+# -- subjects and teaching assignments ---------------------------------------------------------
+
+
+def test_an_allotment_fills_the_class_with_the_right_division_and_batch(
+    admin: tuple[TestClient, dict[str, str], Factory],
+) -> None:
+    from datetime import date
+
+    from eaal_platform.db import academic_calendar as cal
+    from eaal_platform.db.models import ClassMember, Course, Professor, Student
+
+    http, headers, factory = admin
+    http.post("/admin/api/programmes/load", headers=headers)
+    page = http.get("/admin/api/teaching", headers=headers).json()
+    assert {s["name"] for s in page["subjects"]} >= {"Deep Learning & GenAI"}
+    subject = next(s for s in page["subjects"] if s["semester"] == 1)
+    semester = cal.semester(1, date.today())
+    http.post(
+        "/admin/api/teaching/subjects/add",
+        headers=headers,
+        json={"course_id": subject["course_id"], "semester": semester, "name": "Probe"},
+    )
+    probe = next(
+        s
+        for s in http.get("/admin/api/teaching", headers=headers).json()["subjects"]
+        if s["name"] == "Probe"
+    )
+    with factory() as db:
+        course = db.get(Course, probe["course_id"])
+        assert course is not None
+        prof = Professor(display_name="Dr K", email="k@x.com", password_hash="x")
+        db.add(prof)
+        for n, (div, batch, year) in enumerate(
+            [("A", "1", 1), ("A", "2", 1), ("B", "1", 1), ("A", "1", 2)]
+        ):
+            db.add(
+                Student(
+                    display_name=f"S{n}",
+                    email=f"s{n}@x.com",
+                    password_hash="x",
+                    course_id=course.id,
+                    division=div,
+                    batch=batch,
+                    year=year,
+                )
+            )
+        db.commit()
+        prof_id = prof.id
+
+    reply = http.post(
+        "/admin/api/teaching/assign",
+        headers=headers,
+        json={"professor_id": prof_id, "subject_id": probe["id"], "division": "A", "batch": "1"},
+    )
+    assert reply.json()["result"] == {"added_students": 1}
+    with factory() as db:
+        names = {
+            db.get(Student, m.student_id).display_name  # type: ignore[union-attr]
+            for m in db.query(ClassMember).filter_by(professor_id=prof_id)
+        }
+    assert names == {"S0"}
+
+    both = http.post(
+        "/admin/api/teaching/assign",
+        headers=headers,
+        json={"professor_id": prof_id, "subject_id": probe["id"], "division": "A"},
+    )
+    assert both.json()["result"] == {"added_students": 1}
+    assert (
+        http.post(
+            "/admin/api/teaching/subjects/remove", headers=headers, json={"id": probe["id"]}
+        ).status_code
+        == 400
+    )
