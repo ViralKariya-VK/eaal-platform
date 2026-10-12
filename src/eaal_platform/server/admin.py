@@ -41,7 +41,7 @@ from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
 from eaal_platform.buildinfo import VERSION
-from eaal_platform.db import academics, app_settings, approval_import, approvals
+from eaal_platform.db import academics, app_settings, approval_import, approvals, roster
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     create_professor_account,
@@ -263,6 +263,16 @@ class ImportRequest(BaseModel):
     data_base64: str
 
 
+class RosterRequest(BaseModel):
+    filename: str
+    data_base64: str
+    # What the sheet names do not say (a single list called "Sheet1", say).
+    programme: str | None = None
+    division: str | None = None
+    semester: int | None = None
+    commit: bool = False  # False: show what would happen, change nothing
+
+
 class CreateUserRequest(BaseModel):
     role: str
     name: str
@@ -407,7 +417,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
     def overview(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
         with state.session_factory() as db:
             counts = {
-                "students": db.query(Student).filter(Student.email.is_not(None)).count(),
+                "students": db.query(Student).filter(Student.password_hash.is_not(None)).count(),
                 "professors": db.query(Professor).count(),
                 "labs": db.query(Task)
                 .filter(Task.assessment_kind.is_(None), Task.archived_at.is_(None))
@@ -471,7 +481,9 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                     "online": ("student", s.id) in online,
                     "created_at": _jsonable(s.created_at),
                 }
-                for s in db.query(Student).filter(Student.email.is_not(None)).order_by(Student.id)
+                for s in db.query(Student)
+                .filter(Student.password_hash.is_not(None))
+                .order_by(Student.id)
             ]
             professors = [
                 {
@@ -909,7 +921,7 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
                 for ev, se, st in latest_events
             ]
             accounts = {
-                "students": db.query(Student).filter(Student.email.is_not(None)).count(),
+                "students": db.query(Student).filter(Student.password_hash.is_not(None)).count(),
                 "professors": db.query(Professor).count(),
                 "disabled": (
                     db.query(Student).filter(Student.disabled.is_(True)).count()
@@ -1102,6 +1114,59 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         )
         state.bump(TOPIC_ACCOUNTS)
         return {**report.as_dict(), "rows": len(rows)}
+
+    @router.post("/programmes/load")
+    def load_programmes(admin: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        """Set up the college's six programmes (MSc and BSc in the three specializations)."""
+        added = roster.load_programmes(state.session_factory)
+        audit(admin, "load_programmes", f"{added} added")
+        state.bump(TOPIC_ACCOUNTS)
+        return {"added": added}
+
+    @router.post("/roster/import")
+    def roster_import(
+        request: RosterRequest, admin: _AdminSession = Depends(current_admin)
+    ) -> dict[str, Any]:
+        """Read the college's student lists; with ``commit`` create the accounts.
+
+        The temporary passwords come back in this one response and are not stored anywhere.
+        """
+        try:
+            data = base64.b64decode(request.data_base64, validate=True)
+            groups = roster.read_groups(data, filename=request.filename)
+        except (binascii.Error, ValueError, KeyError, OSError):
+            raise HTTPException(status_code=400, detail="That file couldn't be read.") from None
+        except Exception as exc:  # a damaged workbook raises assorted library errors
+            raise HTTPException(status_code=400, detail="That file couldn't be read.") from exc
+        if not groups:
+            raise HTTPException(
+                status_code=400,
+                detail="No student list found: each sheet needs a SAP ID column and a Name column.",
+            )
+        plan = roster.build_plan(
+            state.session_factory,
+            groups,
+            programme=request.programme,
+            division=request.division,
+            semester=request.semester,
+        )
+        result: dict[str, Any] = {"committed": False, **roster.summarise(plan)}
+        if request.commit:
+            done = roster.apply_plan(state.session_factory, plan)
+            result.update(
+                committed=True,
+                created=done.created,
+                updated=done.updated,
+                credentials=done.credentials,
+            )
+            audit(
+                admin,
+                "import_students",
+                f"{done.created} created, {done.updated} updated, "
+                f"{len(plan.problems)} left out ({request.filename})",
+            )
+            state.bump(TOPIC_ACCOUNTS)
+        return result
 
     @router.get("/allowed-template/{role}.csv")
     def allowed_template(role: str, _: _AdminSession = Depends(current_admin)) -> Response:

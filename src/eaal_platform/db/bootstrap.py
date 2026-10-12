@@ -139,16 +139,25 @@ def _ensure_email_is_free(db_session: OrmSession, email: str) -> None:
         raise ValueError(f"{email} is already registered as a professor")
 
 
+def _find_by_login(db_session: OrmSession, model: Any, identifier: str) -> Any:
+    """The account a sign-in names: a SAP ID (digits) or an email address."""
+    text = identifier.strip()
+    if "@" not in text:
+        found = db_session.query(model).filter(model.sap_id == text).first()
+        if found is not None:
+            return found
+    return db_session.query(model).filter(func.lower(model.email) == normalise_email(text)).first()
+
+
 def authenticate_student(
     session_factory: sessionmaker[OrmSession], *, email: str, password: str
 ) -> tuple[int, str] | None:
-    """Return ``(id, display_name)`` if the credentials match a Student account, else ``None``."""
+    """Return ``(id, display_name)`` if the credentials match a Student account, else ``None``.
+
+    ``email`` may also be the student's SAP ID.
+    """
     with session_factory() as db_session:
-        student = (
-            db_session.query(Student)
-            .filter(func.lower(Student.email) == normalise_email(email))
-            .first()
-        )
+        student = _find_by_login(db_session, Student, email)
         if student is None or student.password_hash is None:
             return None
         if not verify_password(password, student.password_hash):
@@ -159,13 +168,12 @@ def authenticate_student(
 def authenticate_professor(
     session_factory: sessionmaker[OrmSession], *, email: str, password: str
 ) -> tuple[int, str] | None:
-    """Return ``(id, display_name)`` if the credentials match a Professor account, else ``None``."""
+    """Return ``(id, display_name)`` if the credentials match a Professor account, else ``None``.
+
+    ``email`` may also be the professor's SAP ID.
+    """
     with session_factory() as db_session:
-        professor = (
-            db_session.query(Professor)
-            .filter(func.lower(Professor.email) == normalise_email(email))
-            .first()
-        )
+        professor = _find_by_login(db_session, Professor, email)
         if professor is None or professor.password_hash is None:
             return None
         if not verify_password(password, professor.password_hash):

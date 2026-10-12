@@ -111,6 +111,9 @@ _ADDED_COLUMNS = (
     ("courses", "code", "VARCHAR(20)"),
     ("courses", "level", "VARCHAR(20) NOT NULL DEFAULT 'BACHELORS'"),
     ("courses", "department", "VARCHAR(100) NOT NULL DEFAULT 'Other'"),
+    ("students", "sap_id", "VARCHAR(20)"),
+    ("students", "admission_year", "INTEGER"),
+    ("professors", "sap_id", "VARCHAR(20)"),
 )
 
 
@@ -136,6 +139,15 @@ def _give_courses_codes(engine: Engine) -> None:
         )
 
 
+def _make_sap_ids_unique(engine: Engine) -> None:
+    """A SAP ID belongs to one person: enforce it on databases made before the column existed."""
+    with engine.begin() as connection:
+        for table in ("students", "professors"):
+            connection.execute(
+                text(f"CREATE UNIQUE INDEX IF NOT EXISTS ix_{table}_sap_id ON {table} (sap_id)")
+            )
+
+
 def _copy_single_professors(engine: Engine) -> None:
     """Older databases gave each student one professor; make those class memberships."""
     with engine.begin() as connection:
@@ -152,6 +164,7 @@ def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _add_missing_columns(engine)
     _give_courses_codes(engine)
+    _make_sap_ids_unique(engine)
     _copy_single_professors(engine)
 
 

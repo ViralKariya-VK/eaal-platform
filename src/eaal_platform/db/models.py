@@ -123,6 +123,11 @@ class Student(Base):
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
     enrollment_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # The college's own ID (SAP ID): unique, and can be used to sign in instead of an email.
+    sap_id: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    # The year the student joined (2025 for the 2025-2027 intake). The year of study is worked out
+    # from it and today's date, see ``db/academic_calendar.py``; ``year`` below holds the result.
+    admission_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # True after a professor resets this student's password: the temporary
     # one works to sign in, but the student is asked to replace it right away.
     must_change_password: Mapped[bool] = mapped_column(
@@ -140,7 +145,9 @@ class Student(Base):
     # lists an administrator maintains; see ``Course``). All optional so
     # accounts made before these existed stay valid.
     course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id"), nullable=True)
-    year: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1 = first year
+    # 1 = first year. For a student with an ``admission_year`` it is kept up to date from the
+    # calendar (``academics.sync_student_years``); 0 means the programme has been completed.
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     division: Mapped[str | None] = mapped_column(String(50), nullable=True)
     batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
     roll_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -170,6 +177,8 @@ class Professor(Base):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The college's own ID (SAP ID): unique, and can be used to sign in instead of an email.
+    sap_id: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     # True after an admin resets this professor's password (see Student).
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"

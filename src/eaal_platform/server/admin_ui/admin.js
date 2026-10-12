@@ -577,7 +577,7 @@ function showUsers(quiet) {
     const row = (role) => (u) => [
       u.id,
       esc(u.name),
-      esc(u.email),
+      esc([u.sap_id, u.email].filter(Boolean).join(" · ")) || '<span class="muted">none</span>',
       role === "student" ? placeText(u) : `${u.students} students · ${u.resources} shared`,
       role === "student" ? teacherCell(u) : esc((u.courses || []).join(", ") || "No courses"),
       role === "student" ? u.sessions : "",
@@ -594,9 +594,9 @@ function showUsers(quiet) {
       <p class="muted">${data.students.length} students · ${data.professors.length} professors. Changing an email or password signs that person out. Disabling keeps their history but blocks sign-in. A student can be in several teachers' classes (one per subject); each teacher can share resources with their own students and manage them. Accounts you add here don't need an approved email; people signing up themselves do (see Approved emails).</p></div>
       <button class="primary" id="newUser">Add account</button></div>
       <div class="card"><h3>Professors (${data.professors.length})</h3>
-        ${table(["ID", "Name", "Email", "Class", "Teaches", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
+        ${table(["ID", "Name", "SAP ID / email", "Class", "Teaches", "", "Status", ""], data.professors.map(row("professor")), { empty: "No professors yet." })}</div>
       <div class="card"><h3>Students (${data.students.length})</h3>
-        ${table(["ID", "Name", "Email", "Course · year · div · batch · roll", "Teachers", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
+        ${table(["ID", "Name", "SAP ID / email", "Programme · batch · year · semester · division · batch · roll", "Teachers", "Sessions", "Status", ""], data.students.map(row("student")), { empty: "No students yet." })}</div>`;
 
     document.getElementById("newUser").addEventListener("click", () => userForm(null));
     main().querySelectorAll("[data-teachers]").forEach((button) =>
@@ -672,7 +672,12 @@ function showUsers(quiet) {
 
 function placeText(u) {
   if (!u.course) return `<span class="muted">${esc(u.roll_number ? "Roll " + u.roll_number : "No course set")}</span>`;
-  return esc([u.course_label || u.course, u.year_label, u.division && "Div " + u.division, u.batch && "Batch " + u.batch, u.roll_number && "Roll " + u.roll_number].filter(Boolean).join(" · "));
+  if (u.completed) return esc([u.course_label || u.course, "Completed " + (u.batch_of || "")].join(" · "));
+  return esc(
+    [u.course_label || u.course, u.batch_of, u.year_label, u.semester_label, u.division && "Div " + u.division, u.batch && "Batch " + u.batch, u.roll_number && "Roll " + u.roll_number]
+      .filter(Boolean)
+      .join(" · ")
+  );
 }
 
 // The course / year / division / batch / roll number fields, filled from the course list.
@@ -836,9 +841,114 @@ function showEmail() {
 // they teach -> students pick a course when they sign up -> each student automatically
 // joins the class of the professor who teaches their course.
 
+// The college's programmes (what "Set up the NMIMS programmes" creates).
+const NMIMS_PROGRAMMES = [
+  "MSc Data Science",
+  "MSc Statistics and Data Science",
+  "MSc Applied Statistics and Analytics",
+  "BSc Data Science",
+  "BSc Statistics and Data Science",
+  "BSc Applied Statistics and Analytics",
+];
+
+// Importing the college's student lists: check the file first, then create the accounts.
+function importStudentsDialog(courseData) {
+  const programmes = [...new Set([...NMIMS_PROGRAMMES, ...courseData.courses.map((c) => c.name)])];
+  let file = null;
+  const o = modal(`
+    <h3>Import students</h3>
+    <p class="muted">An Excel or CSV file with <b>SAP ID</b> and <b>Name</b> columns (and <b>Roll No</b> if you have it): one sheet per division, named like <code>MSc DS Div-A (Sem-III)</code>. The sheet name tells CAVY the programme, the division and the semester, and from the semester and today's date it works out the year and the batch (e.g. 2025-2027). Roll numbers are kept as given, otherwise numbered in SAP ID order. Batch 1 is the first half of a division, Batch 2 the second.</p>
+    <label>File <input type="file" id="rFile" accept=".xlsx,.xlsm,.csv" /></label>
+    <details style="margin-top:10px"><summary class="muted">If the sheet name does not say…</summary>
+      <label>Programme <select id="rProgramme"><option value="">(from the sheet name)</option>${programmes.map((p) => `<option>${esc(p)}</option>`).join("")}</select></label>
+      <label>Division <input id="rDivision" placeholder="e.g. A" /></label>
+      <label>Semester <select id="rSemester"><option value="">(from the sheet name)</option>${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>
+    </details>
+    <div id="rResult"></div>
+    <p class="error" id="rError"></p>
+    <div class="actions"><button id="rCancel">Close</button><button id="rCheck">Check the file</button><button class="primary" id="rCreate" disabled>Create accounts</button></div>`);
+  const result = o.querySelector("#rResult");
+  const errorEl = o.querySelector("#rError");
+  const readFile = () =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(",") + 1));
+      reader.onerror = () => reject(new Error("That file couldn't be read."));
+      reader.readAsDataURL(file);
+    });
+  const send = async (commit) => {
+    errorEl.textContent = "";
+    file = o.querySelector("#rFile").files[0];
+    if (!file) {
+      errorEl.textContent = "Choose a file first.";
+      return null;
+    }
+    return post("/roster/import", {
+      filename: file.name,
+      data_base64: await readFile(),
+      programme: o.querySelector("#rProgramme").value || null,
+      division: o.querySelector("#rDivision").value.trim() || null,
+      semester: Number(o.querySelector("#rSemester").value) || null,
+      commit,
+    });
+  };
+  const groupsTable = (r) =>
+    table(
+      ["Sheet", "Programme", "Div", "Sem", "Batch of", "Students", "Batch 1", "Batch 2"],
+      r.groups.map((g) => [esc(g.sheet), esc(g.programme || "?"), esc(g.division || "?"), esc(g.semester || "?"), esc(g.batch_of || ""), g.students, g.batch_1, g.batch_2])
+    );
+  const problemsTable = (r) =>
+    r.problems.length
+      ? `<h3 style="margin-top:12px">Left out (${r.problems.length})</h3>${table(["Sheet", "Line", "SAP ID", "Name", "Why"], r.problems.map((p) => [esc(p.sheet), p.line, esc(p.sap_id), esc(p.name), esc(p.error)]))}`
+      : "";
+  o.querySelector("#rCancel").addEventListener("click", () => {
+    o.remove();
+    showCourses();
+  });
+  o.querySelector("#rCheck").addEventListener("click", async () => {
+    try {
+      const r = await send(false);
+      if (!r) return;
+      result.innerHTML = `<h3 style="margin-top:12px">${r.students} students ready</h3>${groupsTable(r)}${problemsTable(r)}`;
+      o.querySelector("#rCreate").disabled = r.students === 0;
+    } catch (err) {
+      errorEl.textContent = err.message;
+    }
+  });
+  const create = o.querySelector("#rCreate");
+  create.addEventListener("click", async () => {
+    create.disabled = true;
+    try {
+      const r = await send(true);
+      if (!r) return;
+      const csv = ["SAP ID,Name,Division,Batch,Temporary password"]
+        .concat(r.credentials.map((c) => [c.sap_id, `"${c.name.replace(/"/g, '""')}"`, c.division, c.batch, c.temporary_password].join(",")))
+        .join("\n");
+      result.innerHTML = `<h3 style="margin-top:12px">Done: ${r.created} accounts created, ${r.updated} updated</h3>
+        ${r.credentials.length ? `<p class="muted">Students sign in with their <b>SAP ID</b> and a temporary password, and choose their own at first sign-in. <b>The passwords are shown only now</b>: download the file and hand them out.</p><button class="primary" id="rDownload">Download the passwords (CSV)</button>` : ""}
+        ${problemsTable(r)}`;
+      const dl = result.querySelector("#rDownload");
+      if (dl)
+        dl.addEventListener("click", () => {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+          link.download = "cavy-temporary-passwords.csv";
+          link.click();
+          URL.revokeObjectURL(link.href);
+        });
+      o.querySelector("#rCheck").remove();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      create.disabled = false;
+    }
+  });
+}
+
 function showCourses() {
   return guarded(async () => {
     const data = await get("/courses");
+    const have = new Set(data.courses.map((c) => c.name));
+    const missingProgrammes = NMIMS_PROGRAMMES.filter((name) => !have.has(name));
     const step = (n, title, text) => `<div class="step"><span class="step-n">${n}</span><div><b>${title}</b><div class="muted">${text}</div></div></div>`;
     const rows = data.courses.map((c) => [
       `<span class="code-badge">${esc(c.code)}</span>`,
@@ -853,7 +963,7 @@ function showCourses() {
     main().innerHTML = `
       <div class="page-head"><div><h1>Courses &amp; classes</h1>
         <p class="muted">Every course has its own ID. Students choose their course when they sign up, professors choose the courses they teach, and the two are matched automatically.</p></div>
-        <button class="primary" id="addCourse">Add course</button></div>
+        <div class="row-actions" style="align-items:center">${missingProgrammes.length ? '<button id="loadProgrammes">Set up the NMIMS programmes</button>' : ""}<button id="importStudents">Import students</button><button class="primary" id="addCourse">Add course</button></div></div>
       <div class="pipeline">
         ${step(1, "Add the course", "Name, level, department and years. It gets an ID.")}
         ${step(2, "Add divisions &amp; batches", "Optional. Students are only asked for what you add.")}
@@ -863,6 +973,20 @@ function showCourses() {
       <div class="card">${table(["ID", "Course", "Level", "Department", "Years", "Students", "Professors", ""], rows, { empty: "No courses yet. Add the first one." })}</div>`;
 
     document.getElementById("addCourse").addEventListener("click", () => courseForm(null, data));
+    document.getElementById("importStudents").addEventListener("click", () => importStudentsDialog(data));
+    const loadButton = document.getElementById("loadProgrammes");
+    if (loadButton)
+      loadButton.addEventListener("click", async () => {
+        loadButton.disabled = true;
+        try {
+          const result = await post("/programmes/load");
+          toast(`${result.added} programme${result.added === 1 ? "" : "s"} set up.`);
+          showCourses();
+        } catch (err) {
+          loadButton.disabled = false;
+          toast(err.message);
+        }
+      });
     main().querySelectorAll("[data-manage]").forEach((b) => b.addEventListener("click", () => manageCourse(Number(b.dataset.manage))));
     main().querySelectorAll("[data-edit-course]").forEach((b) =>
       b.addEventListener("click", () => courseForm(data.courses.find((x) => x.id === Number(b.dataset.editCourse)), data))

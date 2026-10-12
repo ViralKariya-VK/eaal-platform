@@ -203,6 +203,12 @@ def test_roster_lists_students_alphabetically(api: CavyApi) -> None:
             "division",
             "batch",
             "roll_number",
+            "sap_id",
+            "admission_year",
+            "batch_of",
+            "semester",
+            "semester_label",
+            "completed",
         }
         for entry in roster
     )
@@ -223,6 +229,12 @@ def test_get_profile(api: CavyApi) -> None:
         "division": None,
         "batch": None,
         "roll_number": None,
+        "sap_id": None,
+        "admission_year": None,
+        "batch_of": None,
+        "semester": None,
+        "semester_label": None,
+        "completed": False,
     }
     api.login("professor", "prof@example.com", _OLD)
     assert api.get_profile()["role"] == "professor"

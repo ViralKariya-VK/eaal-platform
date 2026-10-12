@@ -566,7 +566,7 @@ function showLogin() {
           <button class="${loginRole === "professor" ? "active" : ""}" data-role="professor">Teacher</button>
         </div>
         <div class="auth-form">
-          <label>Email <input type="text" id="loginEmail" placeholder="you@school.edu" /></label>
+          <label>SAP ID or email <input type="text" id="loginEmail" placeholder="SAP ID or you@school.edu" autocomplete="username" /></label>
           <label>Password <input type="password" id="loginPassword" placeholder="••••••••" /></label>
           <p class="auth-error" id="loginError"></p>
           <button class="primary auth-submit" id="loginButton">Log in</button>
@@ -612,7 +612,7 @@ function showLogin() {
     const password = document.getElementById("loginPassword").value;
     const errorEl = document.getElementById("loginError");
     if (!email || !password) {
-      errorEl.textContent = "Enter your email and password.";
+      errorEl.textContent = "Enter your SAP ID (or email) and password.";
       return;
     }
     api()
@@ -1522,11 +1522,14 @@ function showProfile() {
           <div><h2>${escapeHtml(profile.name)}</h2><span class="pill pill-neutral">${roleLabel}</span></div>
         </div>
         <dl class="profile-facts">
+          ${profile.sap_id ? `<div><dt>SAP ID</dt><dd>${escapeHtml(profile.sap_id)}</dd></div>` : ""}
           <div><dt>Email</dt><dd>${escapeHtml(profile.email || "—")}</dd></div>
           ${
             profile.course
               ? `<div><dt>Course</dt><dd>${escapeHtml(profile.course_label || profile.course)}</dd></div>
-                 ${profile.year_label ? `<div><dt>Year</dt><dd>${escapeHtml(profile.year_label)}</dd></div>` : ""}
+                 ${profile.batch_of ? `<div><dt>Batch of</dt><dd>${escapeHtml(profile.batch_of)}</dd></div>` : ""}
+                 ${profile.completed ? `<div><dt>Status</dt><dd>Course completed</dd></div>` : ""}
+                 ${profile.year_label ? `<div><dt>Year</dt><dd>${escapeHtml(profile.year_label)}${profile.semester_label ? ` &middot; ${escapeHtml(profile.semester_label)}` : ""}</dd></div>` : ""}
                  ${profile.division ? `<div><dt>Division</dt><dd>${escapeHtml(profile.division)}</dd></div>` : ""}
                  ${profile.batch ? `<div><dt>Batch</dt><dd>${escapeHtml(profile.batch)}</dd></div>` : ""}`
               : ""
@@ -2061,7 +2064,7 @@ function classTreeHtml(students, studentRow) {
     `<summary class="tree-${level}"><span>${escapeHtml(label)}</span><span class="muted">${list.length} student${list.length === 1 ? "" : "s"}${average(list) === null ? "" : ` &middot; average CIQ ${average(list)}`}</span></summary>`;
   const table = (list) => `
     <div class="card tree-table"><table class="data-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Roll No.</th><th>Submitted</th><th>CIQ</th><th>Action</th></tr></thead>
+      <thead><tr><th>Name</th><th>SAP ID / email</th><th>Roll No.</th><th>Submitted</th><th>CIQ</th><th>Action</th></tr></thead>
       <tbody>${list.sort((a, b) => a.name.localeCompare(b.name)).map(studentRow).join("")}</tbody>
     </table></div>`;
   return courses
@@ -2071,7 +2074,7 @@ function classTreeHtml(students, studentRow) {
         ${years
           .map(([year, inYear]) => {
             const groups = byKey(inYear, (s) => `${s.division ? "Division " + s.division : "No division"} · ${s.batch ? "Batch " + s.batch : "No batch"}`).sort(([a], [b]) => a.localeCompare(b));
-            return `<details class="tree-node tree-child" open>${summary(year ? inYear[0].year_label : "Year not set", inYear, "year")}
+            return `<details class="tree-node tree-child" open>${summary(year ? [inYear[0].year_label, inYear[0].batch_of && `batch of ${inYear[0].batch_of}`, inYear[0].semester_label].filter(Boolean).join(" · ") : "Year not set", inYear, "year")}
               ${groups.map(([label, list]) => `<div class="tree-group"><div class="tree-group-label">${escapeHtml(label)} <span class="muted">· ${list.length}</span></div>${table(list)}</div>`).join("")}
             </details>`;
           })
@@ -2083,7 +2086,7 @@ function classTreeHtml(students, studentRow) {
 
 function placeLine(item) {
   if (!item.course) return "—";
-  return [item.course_label || item.course, item.year_label, item.division && `Div ${item.division}`, item.batch && `Batch ${item.batch}`]
+  return [item.course_label || item.course, item.batch_of, item.year_label, item.division && `Div ${item.division}`, item.batch && `Batch ${item.batch}`]
     .filter(Boolean)
     .join(" · ");
 }
@@ -2100,7 +2103,7 @@ function showStudents() {
     const studentRow = (student) => `
       <tr>
         <td><button class="link-button view-progress" data-student-id="${student.id}" title="See ${escapeHtml(student.name)}'s progress">${escapeHtml(student.name)}</button>${student.must_change_password ? ` <span class="pill pill-amber">Must change password</span>` : ""}</td>
-        <td>${escapeHtml(student.email || "—")}</td>
+        <td>${escapeHtml(student.sap_id || student.email || "—")}</td>
         <td>${escapeHtml(student.roll_number || student.enrollment_no || "—")}</td>
         <td>${student.sessions_submitted}</td>
         <td>${
@@ -4063,7 +4066,7 @@ function showStudentProgress(studentId, backLabel = "Back to My Class", back = s
   api()
     .get_student_progress(studentId)
     .then((data) => {
-      const place = [data.student.course_label || data.student.course, data.student.year_label, data.student.division && `Div ${data.student.division}`, data.student.batch && `Batch ${data.student.batch}`]
+      const place = [data.student.course_label || data.student.course, data.student.batch_of, data.student.year_label, data.student.semester_label, data.student.division && `Div ${data.student.division}`, data.student.batch && `Batch ${data.student.batch}`]
         .filter(Boolean)
         .join(" · ");
       const heading = `<button class="back-link" id="progressBack">${icon("back")}${escapeHtml(backLabel)}</button>

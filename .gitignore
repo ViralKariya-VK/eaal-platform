@@ -41,3 +41,7 @@ src/eaal_platform/_build_info.py
 
 # a private note in the project folder: never commit
 cavy.txt
+
+# Real student lists and the passwords made from them are personal data: never commit them.
+data/
+*temporary-passwords*.csv

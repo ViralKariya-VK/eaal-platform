@@ -326,10 +326,11 @@ class CavyApi:
         ``login`` again) can never leave a stale identity of the other
         role still "logged in" underneath it.
         """
+        academics.ensure_years_current(self._session_factory)
         if role == "student":
             result = authenticate_student(self._session_factory, email=email, password=password)
             if result is None:
-                return {"ok": False, "error": "Incorrect email or password."}
+                return {"ok": False, "error": "Incorrect SAP ID, email or password."}
             if self._is_disabled("student", result[0]):
                 return {"ok": False, "error": _DISABLED_MESSAGE}
             self._current_student_id, self._current_student_name = result
@@ -344,7 +345,7 @@ class CavyApi:
         if role == "professor":
             result = authenticate_professor(self._session_factory, email=email, password=password)
             if result is None:
-                return {"ok": False, "error": "Incorrect email or password."}
+                return {"ok": False, "error": "Incorrect SAP ID, email or password."}
             if self._is_disabled("professor", result[0]):
                 return {"ok": False, "error": _DISABLED_MESSAGE}
             self._current_professor_id, self._current_professor_name = result
@@ -454,8 +455,11 @@ class CavyApi:
                 return {"ok": False, "error": "Use Profile to change your password."}
             if student.password_hash and verify_password(new_password, student.password_hash):
                 return {"ok": False, "error": "Choose a password different from the temporary one."}
+        with self._session_factory() as db_session:
+            placed = bool((s := db_session.get(Student, student_id)) and s.course_id is not None)
         try:
-            place = academics.signup_cohort(self._session_factory, cohort)
+            # A student the college loaded already has a place: don't ask for it again.
+            place = None if placed else academics.signup_cohort(self._session_factory, cohort)
         except academics.AcademicError as exc:
             return {"ok": False, "error": str(exc)}
         with self._session_factory() as db_session:
@@ -507,6 +511,7 @@ class CavyApi:
                         "role": "professor",
                         "name": professor.display_name,
                         "email": professor.email,
+                        "sap_id": professor.sap_id,
                         "enrollment_no": None,
                         "must_change_password": professor.must_change_password,
                     }

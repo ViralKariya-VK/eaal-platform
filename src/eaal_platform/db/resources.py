@@ -127,7 +127,7 @@ def class_students(
         rows = (
             db.query(Student)
             .join(ClassMember, ClassMember.student_id == Student.id)
-            .filter(ClassMember.professor_id == professor_id, Student.email.is_not(None))
+            .filter(ClassMember.professor_id == professor_id, Student.password_hash.is_not(None))
             .order_by(Student.display_name)
             .all()
         )
@@ -142,7 +142,7 @@ def addable_students(
         mine = select(ClassMember.student_id).where(ClassMember.professor_id == professor_id)
         rows = (
             db.query(Student)
-            .filter(Student.email.is_not(None), Student.id.not_in(mine))
+            .filter(Student.password_hash.is_not(None), Student.id.not_in(mine))
             .order_by(Student.display_name)
             .all()
         )

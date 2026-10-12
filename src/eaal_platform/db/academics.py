@@ -12,12 +12,15 @@ Pure database logic: no HTTP, no screens. Problems are raised as
 
 from __future__ import annotations
 
+import weakref
+from datetime import date
 from typing import Any
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform.db import academic_calendar as cal
 from eaal_platform.db.models import (
     ClassMember,
     Course,
@@ -365,7 +368,7 @@ def course_roster(
             links.setdefault(link.student_id, []).append(names.get(link.professor_id, "?"))
         rows = (
             db.query(Student)
-            .filter(Student.course_id == course_id, Student.email.is_not(None))
+            .filter(Student.course_id == course_id, Student.password_hash.is_not(None))
             .order_by(Student.year, Student.division, Student.batch, Student.display_name)
             .all()
         )
@@ -474,9 +477,9 @@ def lab_target(
         return _resolve(db, raw, student=False)
 
 
-def describe(student: Student) -> dict[str, Any]:
+def describe(student: Student, today: date | None = None) -> dict[str, Any]:
     """A student's place, ready to show."""
-    return {
+    place: dict[str, Any] = {
         "course": student.course.name if student.course else None,
         "course_label": course_label(student.course) if student.course else None,
         "year": student.year,
@@ -484,7 +487,68 @@ def describe(student: Student) -> dict[str, Any]:
         "division": student.division,
         "batch": student.batch,
         "roll_number": student.roll_number,
+        "sap_id": student.sap_id,
+        "admission_year": student.admission_year,
+        "batch_of": None,
+        "semester": None,
+        "semester_label": None,
+        "completed": student.year == 0,
     }
+    if student.admission_year and student.course:
+        on = today or date.today()
+        place["batch_of"] = cal.batch_of(student.admission_year, student.course.years)
+        if student.year and student.year > 0:
+            number = cal.semester(student.year, on)
+            place["semester"] = number
+            place["semester_label"] = f"Sem {cal.roman(number)}"
+    return place
+
+
+# -- keeping each student's year of study up to date --------------------------------------
+
+
+def _year_from_calendar(student: Student, on: date) -> int | None:
+    """A student's year today: ``None`` before the programme starts, ``0`` once it is over."""
+    if student.admission_year is None or student.course is None:
+        return student.year
+    year = cal.year_of_study(student.admission_year, on)
+    if year < 1:
+        return None
+    return 0 if year > student.course.years else year
+
+
+def sync_student_years(session_factory: sessionmaker[OrmSession], today: date | None = None) -> int:
+    """Move every student with an admission year to the year the calendar says.
+
+    Returns how many changed.
+
+    Run when the app or server starts, and once a day while it runs, so on 1 July everyone moves up
+    without anyone editing anything. A student who moves into a year joins the classes of the
+    professors who take that group.
+    """
+    on = today or date.today()
+    moved: list[int] = []
+    with session_factory() as db:
+        for student in db.query(Student).filter(Student.admission_year.is_not(None)).all():
+            year = _year_from_calendar(student, on)
+            if year != student.year:
+                student.year = year
+                moved.append(student.id)
+        db.commit()
+    for student_id in moved:
+        assign_by_groups(session_factory, student_id)
+    return len(moved)
+
+
+_years_synced_on: weakref.WeakKeyDictionary[Any, date] = weakref.WeakKeyDictionary()
+
+
+def ensure_years_current(session_factory: sessionmaker[OrmSession]) -> None:
+    """``sync_student_years`` at most once a day per database (cheap to call at login)."""
+    today = date.today()
+    if _years_synced_on.get(session_factory) != today:
+        _years_synced_on[session_factory] = today
+        sync_student_years(session_factory, today)
 
 
 def lab_visible_to(student: Student, task: Task) -> bool:
@@ -511,7 +575,9 @@ def _matching(
     division: str | None,
     batch: str | None,
 ) -> Any:
-    query = db.query(Student).filter(Student.course_id == course_id, Student.email.is_not(None))
+    query = db.query(Student).filter(
+        Student.course_id == course_id, Student.password_hash.is_not(None)
+    )
     if year is not None:
         query = query.filter(Student.year == year)
     if division is not None:
