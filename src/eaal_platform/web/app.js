@@ -2538,10 +2538,13 @@ function renderCreateSession(existing, courses) {
             <option value="Hard">Hard</option>
           </select>
         </label>
-        <label class="span-2">Description
-          <textarea id="sessionDescription" rows="4" placeholder="Describe the problem only. Students see it when the assessment starts."></textarea>
+        <label class="span-2">Problem statement
+          <textarea id="sessionDescription" rows="3" placeholder="The question only, e.g. &quot;Merge two arrays into one, keeping the order.&quot; Students see it when the assessment starts."></textarea>
         </label>
-        <div class="span-2 ai-draft-row"><button class="ghost" id="draftDescription" type="button">${icon("sparkle")}Draft with AI</button><span class="muted" id="draftStatus">Write a few words about the problem first, or leave it empty to use just the title and topic.</span></div>
+        <label class="span-2">Instructions
+          <textarea id="sessionInstructions" rows="5" placeholder="What to follow: input format, output format, an example (Input: ... Output: ...), constraints. One point per line."></textarea>
+        </label>
+        <div class="span-2 ai-draft-row"><button class="ghost" id="draftDescription" type="button">${icon("sparkle")}Draft with AI</button><span class="muted" id="draftStatus">Write a few words first, or leave both empty to use just the title and topic. The AI fills the question and the instructions separately.</span></div>
       </div>
     </div>
     <div class="card" style="margin-top:16px;">
@@ -2566,7 +2569,8 @@ function renderCreateSession(existing, courses) {
       title: document.getElementById("sessionTitle").value.trim(),
       topic: document.getElementById("sessionTopic").value.trim(),
       difficulty: document.getElementById("sessionDifficulty").value,
-    })
+    }),
+    document.getElementById("sessionInstructions")
   );
   const createButton = document.getElementById("createLabButton");
   createButton.addEventListener("click", () => {
@@ -2613,6 +2617,7 @@ function renderCreateSession(existing, courses) {
       ...target,
       topic: document.getElementById("sessionTopic").value.trim() || null,
       description: document.getElementById("sessionDescription").value.trim() || null,
+      instructions: document.getElementById("sessionInstructions").value.trim() || null,
       difficulty: document.getElementById("sessionDifficulty").value,
       opens_at: text("sessionOpens"),
       stages,
@@ -2689,6 +2694,7 @@ function renderCreateSession(existing, courses) {
     set("sessionTopic", existing.topic);
     set("sessionOpens", existing.opens_at);
     set("sessionDescription", existing.description);
+    set("sessionInstructions", existing.instructions);
     if (existing.difficulty) document.getElementById("sessionDifficulty").value = existing.difficulty;
   }
 }
@@ -2744,10 +2750,11 @@ function confirmModal({ title, message, confirmLabel, danger, onConfirm }) {
 
 // Wires a "Draft with AI" button: sends the title/topic/difficulty and whatever is already
 // in the description box (a rough idea, or a draft to improve) and puts the result in the box.
-function wireAiDraft(button, status, textarea, getSpec) {
+function wireAiDraft(button, status, textarea, getSpec, instructionsArea = null) {
   button.addEventListener("click", () => {
     const spec = { ...getSpec(), notes: textarea.value.trim() };
-    if (!spec.title && !spec.notes) {
+    if (instructionsArea) Object.assign(spec, { split: true, instructions: instructionsArea.value.trim() });
+    if (!spec.title && !spec.notes && !spec.instructions) {
       status.textContent = "Enter a title (or a few notes) first.";
       return;
     }
@@ -2758,6 +2765,7 @@ function wireAiDraft(button, status, textarea, getSpec) {
       .then((result) => {
         if (result.ok) {
           textarea.value = result.text;
+          if (instructionsArea && result.instructions) instructionsArea.value = result.instructions;
           status.textContent = "Drafted. Read it through and edit it before saving.";
         } else {
           status.textContent = result.error || "The AI couldn't draft that.";
@@ -3440,7 +3448,14 @@ function showWorkspace(info) {
           </div>
         </div>
       </div>
-      ${info.task_description ? `<div class="card problem-statement" id="problemStatement">${escapeHtml(info.task_description)}</div>` : ""}
+      ${
+        info.task_description
+          ? `<div class="card problem-statement" id="problemStatement" tabindex="0" aria-label="Problem">
+              <div class="problem-part"><div class="problem-label">Problem</div><div>${escapeHtml(info.task_description)}</div></div>
+              ${info.task_instructions ? `<div class="problem-part"><div class="problem-label">Instructions</div><div class="problem-instructions">${escapeHtml(info.task_instructions)}</div></div>` : ""}
+            </div>`
+          : ""
+      }
       <div class="workspace-body" id="workspaceBody">
         <div class="editor-column">
           <div class="editor-shell" id="editorShell">

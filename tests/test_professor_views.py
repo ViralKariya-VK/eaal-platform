@@ -163,6 +163,21 @@ def test_the_ai_drafts_a_problem_statement(db_session_factory: Factory) -> None:
     logger.stop()
 
 
+def test_the_ai_splits_the_question_from_the_instructions(db_session_factory: Factory) -> None:
+    writer = _Writer(
+        "PROBLEM:\nMerge two arrays.\nINSTRUCTIONS:\nInput: n, then n numbers\nOutput: one line"
+    )
+    _, professor, logger = _people(db_session_factory, writer)
+    result = professor.draft_problem_description({"title": "Merge", "split": True})
+    assert result == {
+        "ok": True,
+        "text": "Merge two arrays.",
+        "instructions": "Input: n, then n numbers\nOutput: one line",
+    }
+    assert "INSTRUCTIONS:" in writer.prompts[0]
+    logger.stop()
+
+
 def test_students_cannot_use_the_professor_tools(db_session_factory: Factory) -> None:
     student, _, logger = _people(db_session_factory)
     for call in (

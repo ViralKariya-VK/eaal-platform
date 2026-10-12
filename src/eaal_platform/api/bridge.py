@@ -1049,8 +1049,7 @@ class CavyApi:
             # class; on a single computer everyone sees every lab.
             professor_id=professor_id if self._restrict_signup else None,
         )
-        if opens_at is not None:
-            self._set_opens_at([task_id], opens_at)
+        self._set_extras([task_id], opens_at, lab.get("instructions"))
         return {"ok": True, "task_id": task_id}
 
     def _lab_target(self, professor_id: int, lab: dict[str, Any]) -> dict[str, Any]:
@@ -1104,6 +1103,7 @@ class CavyApi:
                 "topic": task.learning_objective,
                 "description": task.description,
                 "difficulty": task.difficulty,
+                "instructions": task.instructions,
                 "opens_at": task.opens_at.strftime("%Y-%m-%dT%H:%M") if task.opens_at else None,
                 "archived": _is_archived(task),
                 "stages": [
@@ -1147,17 +1147,23 @@ class CavyApi:
                 course_id=target["course_id"],
                 year=target["year"],
             )
-            self._set_opens_at([task_id], _parse_opens_at(lab.get("opens_at")))
+            self._set_extras(
+                [task_id], _parse_opens_at(lab.get("opens_at")), lab.get("instructions")
+            )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
 
-    def _set_opens_at(self, task_ids: list[int], opens_at: datetime | None) -> None:
+    def _set_extras(
+        self, task_ids: list[int], opens_at: datetime | None, instructions: Any
+    ) -> None:
+        text = str(instructions).strip() if instructions else ""
         with self._session_factory() as db_session:
             for task_id in task_ids:
                 task = db_session.get(Task, task_id)
                 if task is not None:
                     task.opens_at = opens_at
+                    task.instructions = text or None
             db_session.commit()
 
     def duplicate_lab(self, task_id: int, changes: dict[str, Any]) -> dict[str, Any]:
@@ -1454,6 +1460,7 @@ class CavyApi:
                 "task_title": f"{task.title} — {stage.stage_type.value.title()}",
                 # The problem itself is revealed only when the assessment begins.
                 "task_description": task.description if reveals_problem else None,
+                "task_instructions": task.instructions if reveals_problem else None,
                 "topic": task.learning_objective,
                 "starter_files": files,
                 "resumed": resumed,
@@ -2224,24 +2231,42 @@ class CavyApi:
     # -- professor: AI help with writing ----------------------------------------
 
     def draft_problem_description(self, spec: dict[str, Any]) -> dict[str, Any]:
-        """Have the AI draft (or tidy up) a problem statement from a title, topic and notes."""
+        """Have the AI draft (or tidy up) a problem from a title, topic and notes.
+
+        With ``split`` set, the answer is the question (``text``) and the instructions to follow
+        (``instructions``: format, one example, constraints) as two separate parts.
+        """
         self._require_professor_id()
         title = str(spec.get("title") or "").strip()
         notes = str(spec.get("notes") or "").strip()
-        if not title and not notes:
+        extra = str(spec.get("instructions") or "").strip()
+        split = bool(spec.get("split"))
+        if not title and not notes and not extra:
             return {"ok": False, "error": "Enter a title (or a few notes) first."}
         lines = [
-            "Write a clear programming problem statement for a university lab, in plain text "
-            "(no markdown, no headings, no code fences), at most 150 words.",
-            "State what to build, what the input and output are, one short example, and any "
-            "constraints. Do not include the solution.",
-            "Use Python as the language.",
+            "Write a clear programming problem for a university lab, in plain text "
+            "(no markdown, no headings, no code fences).",
+            "Do not include the solution. Use Python as the language.",
         ]
+        if split:
+            lines += [
+                "Reply in exactly two parts. First the line PROBLEM: then the question itself "
+                "(what to build, in at most 80 words). Then the line INSTRUCTIONS: followed by "
+                "short lines: the input format, the output format, one example "
+                "(Input: ... Output: ...) and the constraints.",
+            ]
+        else:
+            lines.append(
+                "State what to build, what the input and output are, one short example and any "
+                "constraints, in at most 150 words."
+            )
         for label, key in (("Title", "title"), ("Topic", "topic"), ("Difficulty", "difficulty")):
             if spec.get(key):
                 lines.append(f"{label}: {spec[key]}")
         if notes:
-            lines.append(f"The professor's notes or current draft (improve this):\n{notes}")
+            lines.append(f"The professor's notes or current question (improve this):\n{notes}")
+        if extra:
+            lines.append(f"The professor's current instructions (improve this):\n{extra}")
         result = self._ai_provider.generate("\n".join(lines), GenerationContext(), Purpose.CHAT)
         if not result.available or not result.text.strip():
             problem = self._ai_provider.diagnose() or result.error
@@ -2250,7 +2275,15 @@ class CavyApi:
                 "error": problem
                 or "The AI assistant didn't answer. Ask your administrator to set it up.",
             }
-        return {"ok": True, "text": result.text.strip()}
+        text = result.text.strip()
+        if not split:
+            return {"ok": True, "text": text}
+        match = re.search(r"INSTRUCTIONS:\s*", text)
+        question, instructions = (
+            (text[: match.start()], text[match.end() :]) if match else (text, "")
+        )
+        question = re.sub(r"^\s*PROBLEM:\s*", "", question).strip()
+        return {"ok": True, "text": question, "instructions": instructions.strip()}
 
     # -- persistence helpers ----------------------------------------------
 

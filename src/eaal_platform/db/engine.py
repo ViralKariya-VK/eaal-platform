@@ -94,6 +94,7 @@ def create_db_engine(db_path: Path | None = None) -> Engine:
 _ADDED_COLUMNS = (
     ("tasks", "archived_at", "DATETIME"),
     ("tasks", "opens_at", "DATETIME"),
+    ("tasks", "instructions", "TEXT"),
     ("students", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
     ("professors", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
     ("students", "disabled", "BOOLEAN NOT NULL DEFAULT 0"),

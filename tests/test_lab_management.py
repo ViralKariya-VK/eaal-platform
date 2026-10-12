@@ -533,3 +533,21 @@ def test_the_problem_is_shown_only_when_the_assessment_starts(
         assert seen[early]["topic"] == "Sorting"
     assert seen["ASSESSMENT"]["task_description"] == "Sort a list"
     assert seen["ASSESSMENT"]["difficulty"] == "Medium"
+
+
+def test_instructions_are_kept_apart_from_the_question_and_shown_with_it(
+    api: tuple[CavyApi, dict[str, Any]],
+) -> None:
+    cavy, _ = api
+    task_id = _create(cavy, instructions="Input: n\nOutput: n squared")
+    assert cavy.get_lab(task_id)["instructions"] == "Input: n\nOutput: n squared"
+    copy = cavy.duplicate_lab(task_id, {})
+    assert cavy.get_lab(copy["task_id"])["instructions"] == "Input: n\nOutput: n squared"
+    cavy.update_lab(task_id, _lab_payload(instructions=""))
+    assert cavy.get_lab(task_id)["instructions"] is None
+
+    _as(cavy, "student", "asha@example.com")
+    stages = cavy.get_stages(copy["task_id"])["stages"]
+    seen = {s["stage_type"]: cavy.start_stage(s["id"]) for s in stages}
+    assert seen["LEARNING"]["task_instructions"] is None
+    assert seen["ASSESSMENT"]["task_instructions"] == "Input: n\nOutput: n squared"

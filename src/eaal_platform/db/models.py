@@ -357,6 +357,9 @@ class Task(Base):
     # and new work on it is blocked, but every session/event/score already
     # recorded against it is kept (deleting would erase students' history).
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # What the student must follow (input/output format, examples, constraints); ``description``
+    # holds the question itself.
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     # When students may start it (local time of the server); ``None`` means right away.
     opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
