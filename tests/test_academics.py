@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.db import academics
 from eaal_platform.db.academics import AcademicError
 from eaal_platform.db.bootstrap import (
@@ -422,7 +423,7 @@ def server(
 ) -> Iterator[tuple[TestClient, ServerState, dict[str, str]]]:
     seed_demo_content(db_session_factory)
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         token = http.post(
             "/admin/api/setup", json={"name": "Root", "email": "r@x.com", "password": _PW}
         ).json()["token"]

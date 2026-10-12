@@ -25,13 +25,14 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from eaal_platform.buildinfo import VERSION  # the one place the version number is written
+
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_INFO = ROOT / "src" / "eaal_platform" / "_build_info.py"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 ICON_PNG = ROOT / "src" / "eaal_platform" / "assets" / "icon.png"
 MONACO_LOADER = ROOT / "src" / "eaal_platform" / "assets" / "monaco" / "vs" / "loader.js"
-VERSION = "0.1.0"
 FONT_SERIF = ROOT / "src" / "eaal_platform" / "assets" / "fonts" / "Lora-Variable.ttf"
 FONT_SANS = ROOT / "src" / "eaal_platform" / "assets" / "fonts" / "Inter-Regular.ttf"
 

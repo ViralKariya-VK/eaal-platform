@@ -36,6 +36,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[server,sandbox-libs,build]" pillow
 
+      - name: Check the tag matches the version in the code
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          code_version=$(python -c "from eaal_platform.buildinfo import VERSION; print(VERSION)")
+          if [ "v$code_version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag is $GITHUB_REF_NAME but the code says version $code_version."
+            echo "Change VERSION in src/eaal_platform/buildinfo.py (and pyproject.toml), commit, then tag again."
+            exit 1
+          fi
+
       - name: Build the installer
         run: python scripts/build_release.py
 
@@ -47,3 +58,42 @@ jobs:
             dist/*-Setup.exe
             dist/*.zip
           if-no-files-found: error
+
+  # Pushing a tag like v0.2.0 also publishes the release: installers, checksums and notes. The apps
+  # notice the new release by themselves (they look at the newest tag on this repository).
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd assets
+          ls -l
+          sha256sum CAVY-*.dmg CAVY-*-Setup.exe > SHA256SUMS.txt
+          {
+            if [ -f "../docs/releases/${GITHUB_REF_NAME}.md" ]; then
+              cat "../docs/releases/${GITHUB_REF_NAME}.md"
+            else
+              echo "CAVY ${GITHUB_REF_NAME#v}."
+            fi
+            echo
+            echo "Not code-signed: the first launch is blocked once on each computer (see docs/DEMO_SETUP.md)."
+            echo
+            echo "| File | SHA-256 |"
+            echo "|---|---|"
+            while read -r hash name; do echo "| $name | \`$hash\` |"; done < SHA256SUMS.txt
+          } > ../notes.md
+          gh release create "$GITHUB_REF_NAME" CAVY-*.dmg CAVY-*-Setup.exe SHA256SUMS.txt \
+            --title "CAVY ${GITHUB_REF_NAME#v}" --notes-file ../notes.md

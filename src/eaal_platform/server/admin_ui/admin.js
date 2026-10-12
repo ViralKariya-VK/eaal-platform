@@ -284,8 +284,20 @@ function showOverview(quiet) {
     const tile = (label, value, hint = "") =>
       `<div class="card tile"><div class="num">${value}</div><div class="muted">${label}</div>${hint ? `<div class="muted" style="font-size:11px">${hint}</div>` : ""}</div>`;
     const ai = data.ai;
+    get("/version")
+      .then((v) => {
+        const line = document.getElementById("versionLine");
+        if (!line) return;
+        const u = v.update || {};
+        line.innerHTML =
+          `This server runs CAVY ${esc(v.version)}.` +
+          (u.ok && u.update_available
+            ? ` <strong>CAVY ${esc(u.latest)} is available</strong>: <a href="${esc(u.page)}" target="_blank" rel="noopener">download it</a>. Update this computer first, then every other computer: all of them must run the same version.`
+            : "");
+      })
+      .catch(() => {});
     main().innerHTML = `
-      <div class="page-head"><div><h1>Overview</h1><p class="muted">Live: updates itself every few seconds.</p></div>
+      <div class="page-head"><div><h1>Overview</h1><p class="muted">Live: updates itself every few seconds.</p><p class="muted" id="versionLine"></p></div>
         <div class="row-actions" style="align-items:center"><label class="switch-line" title="Full screen, blocked app switching and the leave-the-window rule while students take a lab"><input type="checkbox" id="labModeToggle" style="width:auto" ${labOn ? "checked" : ""} /> Lab mode</label><button id="refresh">Refresh now</button></div></div>
       <div class="tiles">
         ${tile("Accounts", a.students + a.professors, `${a.students} students · ${a.professors} professors`)}

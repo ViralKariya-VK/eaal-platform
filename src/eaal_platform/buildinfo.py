@@ -7,7 +7,9 @@ commit and time; running from source has none, so it reports "development".
 
 from __future__ import annotations
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
+# Every call from an app to a classroom server carries this, and the server refuses a different one.
+VERSION_HEADER = "X-CAVY-Version"
 
 try:
     from eaal_platform._build_info import BUILT_AT, COMMIT

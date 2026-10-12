@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.api.bridge import CavyApi, _paste_comes_from_ai
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.client.api import ClientApi
 from eaal_platform.client.lockdown import (
     LLKHF_ALTDOWN,
@@ -293,7 +294,7 @@ def test_the_admin_panel_has_a_lab_mode_switch(db_session_factory: Factory, db_e
     from eaal_platform.server.app import ServerState, create_app
 
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         token = http.post(
             "/admin/api/setup", json={"name": "R", "email": "r@x.com", "password": _PW}
         ).json()["token"]

@@ -36,10 +36,11 @@ from pydantic import BaseModel
 from sqlalchemy import String, Table, cast, func, or_, select
 from sqlalchemy.engine import Row
 
-from eaal_platform import mailer
+from eaal_platform import mailer, updates
 from eaal_platform.ai import cloud_providers
 from eaal_platform.api.bridge import CavyApi
 from eaal_platform.auth import hash_password, password_problem, verify_password
+from eaal_platform.buildinfo import VERSION
 from eaal_platform.db import academics, app_settings, approval_import, approvals
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
@@ -396,6 +397,11 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
         return {"ok": True}
 
     # -- overview ------------------------------------------------------------------
+
+    @router.get("/version")
+    def version(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        """This server's CAVY version, and whether a newer one has been released."""
+        return {"version": VERSION, "update": updates.check_for_update(VERSION)}
 
     @router.get("/overview")
     def overview(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from eaal_platform import logging_setup
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.logging_setup import JsonFormatter, configure_logging, get_logger
 
 
@@ -77,7 +78,7 @@ def test_a_failed_call_is_logged_and_answered_politely(tmp_path: Path) -> None:
     seed_demo_content(factory)
     create_student_account(factory, display_name="S", email="s@x.com", password="hunter2-hunter2")
     state = ServerState(engine, factory, EventLogger(factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         token = http.post(
             "/api/login",
             json={"role": "student", "email": "s@x.com", "password": "hunter2-hunter2"},

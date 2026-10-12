@@ -12,6 +12,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.db.bootstrap import (
     create_professor_account,
     create_student_account,
@@ -31,7 +32,7 @@ def server(
 ) -> Iterator[tuple[TestClient, ServerState]]:
     seed_demo_content(db_session_factory)
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         yield http, state
 
 

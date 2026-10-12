@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform import mailer
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.client.remote import RemoteBackend
 from eaal_platform.db import academics, approvals
 from eaal_platform.db.bootstrap import create_professor_account, seed_demo_content
@@ -136,7 +137,7 @@ def server(
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
     outbox: list[tuple[str, str]] = []
     state.send_mail = lambda settings, to, subject, body: outbox.append((to, body))  # type: ignore[assignment,misc]
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         token = http.post(
             "/admin/api/setup", json={"name": "R", "email": "r@x.com", "password": _PW}
         ).json()["token"]

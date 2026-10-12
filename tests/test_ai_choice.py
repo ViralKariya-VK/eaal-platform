@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.ai.provider import AIProvider, GenerationContext, GenerationResult, Purpose
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.client.api import ClientApi
 from eaal_platform.client.remote import RemoteBackend
 from eaal_platform.db.bootstrap import (
@@ -204,7 +205,7 @@ class Classroom:
 def room(db_engine: Engine, db_session_factory: Factory) -> Iterator[Classroom]:
     seed_demo_content(db_session_factory)
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         yield Classroom(http, state, db_session_factory)
 
 
@@ -377,7 +378,7 @@ def test_admin_can_check_a_key_and_set_the_class_assistant(
     state = ServerState(
         db_engine, db_session_factory, EventLogger(db_session_factory), ai_http=fake.client()
     )
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         token = http.post(
             "/admin/api/setup", json={"name": "A", "email": "a@x.com", "password": _PW}
         ).json()["token"]

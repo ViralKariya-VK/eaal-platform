@@ -24,9 +24,11 @@ from typing import Any
 
 import httpx
 
+from eaal_platform import updates
 from eaal_platform.ai import cloud_providers
 from eaal_platform.ai.provider import AIProvider, GenerationContext, Purpose
 from eaal_platform.api.bridge import CavyApi, save_text_file
+from eaal_platform.buildinfo import VERSION, describe
 from eaal_platform.client.lockdown import LabLock
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
 from eaal_platform.client.settings import load_server_url, normalise_url, save_server_url
@@ -114,12 +116,51 @@ class ClientApi:
             return {"ok": True, **self.get_server_settings()}
         candidate = RemoteBackend(cleaned)
         try:
-            candidate.health()
+            health = candidate.health()
         except ServerUnreachableError as exc:
             return {"ok": False, "error": str(exc), **self.get_server_settings()}
+        if health.get("app_version") != VERSION:
+            # Different versions must not work together: don't connect, say what to update.
+            return {
+                "ok": False,
+                "version_mismatch": True,
+                "error": updates.describe_mismatch(VERSION, health.get("app_version")),
+                **self.get_server_settings(),
+            }
         self._use_server(candidate)
         save_server_url(cleaned)
         return {"ok": True, **self.get_server_settings()}
+
+    # -- versions and updates ---------------------------------------------------------
+
+    def get_version_info(self) -> dict[str, Any]:
+        """This app's version, and (when connected) whether the server runs the same one."""
+        info: dict[str, Any] = {"app": VERSION, "description": describe(), "server": None}
+        if self._server_url and isinstance(self._backend, RemoteBackend):
+            server: dict[str, Any] = {"url": self._server_url}
+            try:
+                theirs = self._backend.health().get("app_version")
+            except ServerUnreachableError as exc:
+                server.update(reachable=False, compatible=None, message=str(exc))
+            else:
+                same = theirs == VERSION
+                server.update(
+                    reachable=True,
+                    version=theirs,
+                    compatible=same,
+                    message=None if same else updates.describe_mismatch(VERSION, theirs),
+                )
+            info["server"] = server
+        return info
+
+    def check_for_update(self, force: bool = False) -> dict[str, Any]:
+        """Is a newer CAVY released? (Asks GitHub at most about twice a day; never fails loudly.)"""
+        return updates.check_for_update(VERSION, force=bool(force))
+
+    def snooze_update(self, version: str) -> dict[str, Any]:
+        """Remind me later: hide the notice for this version for a few days."""
+        updates.snooze(str(version))
+        return {"ok": True}
 
     def wait_for_updates(self, versions: dict[str, int], wait: bool = True) -> dict[str, Any]:
         """Hold until the server has news (live updates); standalone mode has none.

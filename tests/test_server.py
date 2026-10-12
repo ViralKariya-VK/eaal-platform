@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.client.api import ClientApi
 from eaal_platform.client.remote import RemoteBackend, ServerUnreachableError
 from eaal_platform.db import approvals
@@ -32,7 +33,7 @@ def server(
     approvals.add_entry(db_session_factory, "student", name="Ada", email="ada@example.com")
     approvals.add_entry(db_session_factory, "professor", name="Dr. K", email="k@example.com")
     state = ServerState(db_engine, db_session_factory, EventLogger(db_session_factory))
-    with TestClient(create_app(state)) as http:
+    with TestClient(create_app(state), headers={VERSION_HEADER: VERSION}) as http:
         yield http, state
 
 

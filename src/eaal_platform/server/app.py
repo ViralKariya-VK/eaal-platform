@@ -39,11 +39,13 @@ from sqlalchemy.orm import sessionmaker
 from eaal_platform import mailer
 from eaal_platform.ai.provider import AIProvider, ProviderHolder
 from eaal_platform.api.bridge import CavyApi
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
 from eaal_platform.db import academics
 from eaal_platform.db.models import AuditLog
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.logging_setup import get_logger
 from eaal_platform.server import onboarding
+from eaal_platform.updates import describe_mismatch
 
 log = get_logger(__name__)
 
@@ -313,9 +315,31 @@ def create_app(state: ServerState) -> FastAPI:
     app = FastAPI(title="CAVY server", lifespan=lifespan)
     app.state.cavy = state
 
+    @app.middleware("http")
+    async def same_version_only(request: Request, call_next: Any) -> Any:
+        """Apps and server must run the same CAVY: otherwise a call can mean different things."""
+        path = request.url.path
+        if path.startswith("/api/") and path != "/api/health":
+            theirs = request.headers.get(VERSION_HEADER)
+            if theirs != VERSION:
+                message = describe_mismatch(theirs, VERSION)
+                log.warning(
+                    "refused a call from a different version", extra={"app_version": theirs}
+                )
+                return JSONResponse(
+                    {
+                        "error": message,
+                        "code": "version_mismatch",
+                        "server_version": VERSION,
+                        "app_version": theirs,
+                    },
+                    status_code=426,
+                )
+        return await call_next(request)
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "service": "cavy", "version": API_VERSION}
+        return {"ok": True, "service": "cavy", "version": API_VERSION, "app_version": VERSION}
 
     @app.get("/api/academic")
     def academic_options() -> list[dict[str, Any]]:

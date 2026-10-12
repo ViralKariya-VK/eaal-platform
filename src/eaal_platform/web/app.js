@@ -171,6 +171,7 @@ function setScreen(html, activeNav, options) {
     renderSidebar();
   }
   setActiveNav(activeNav);
+  renderUpdateBanner();
 }
 
 // -- Auth: login / create account -----------------------------------------
@@ -209,25 +210,99 @@ function authHero() {
     </div>`;
 }
 
+// -- Updates -------------------------------------------------------------------
+// The app asks GitHub (at most about twice a day, never loudly) whether a newer CAVY is out and shows
+// one small notice. It never downloads anything itself: "Download" opens the page in the browser.
+
+let updateInfo = null;
+
+function refreshUpdateInfo(force = false) {
+  return api()
+    .check_for_update(force)
+    .then((info) => {
+      updateInfo = info;
+      renderUpdateBanner();
+      return info;
+    })
+    .catch(() => null);
+}
+
+function updateIsAvailable() {
+  return !!(updateInfo && updateInfo.ok && updateInfo.update_available);
+}
+
+function renderUpdateBanner() {
+  const banner = document.getElementById("updateBanner");
+  if (!banner) return;
+  // Never in the middle of a lab, and not for a version the person has postponed.
+  const busy = labMode || document.querySelector(".workspace");
+  if (!updateIsAvailable() || updateInfo.snoozed || busy) {
+    banner.hidden = true;
+    banner.innerHTML = "";
+    return;
+  }
+  banner.hidden = false;
+  banner.innerHTML = `
+    <div class="update-text">
+      <strong>CAVY ${escapeHtml(updateInfo.latest)} is available</strong>
+      <span>You have ${escapeHtml(updateInfo.current)}. Computers that use the same server must all run the same version.</span>
+    </div>
+    <div class="update-actions">
+      <button class="primary" id="updateDownload">Download</button>
+      <button class="ghost" id="updateLater">Later</button>
+    </div>`;
+  document.getElementById("updateDownload").addEventListener("click", () => openUpdatePage());
+  document.getElementById("updateLater").addEventListener("click", () => {
+    api()
+      .snooze_update(updateInfo.latest)
+      .then(() => {
+        updateInfo.snoozed = true;
+        renderUpdateBanner();
+      })
+      .catch(() => {});
+  });
+}
+
+function openUpdatePage() {
+  if (!updateIsAvailable()) return;
+  api()
+    .open_link(updateInfo.download || updateInfo.page)
+    .catch((err) => showToast(errorText(err)));
+}
+
+function startUpdateChecks() {
+  refreshUpdateInfo();
+  setInterval(() => refreshUpdateInfo(), 6 * 60 * 60 * 1000);
+}
+
 // -- Server connection (login screen) ----------------------------------------
 
 function renderServerLine() {
   const line = document.getElementById("serverLine");
   if (!line) return;
-  Promise.all([api().get_server_settings(), api().get_hosting()]).then(([settings, hosting]) => {
-    serverMode = settings.mode === "server";
-    const text = serverMode
-      ? `Connected to <strong>${escapeHtml(settings.url)}</strong>`
-      : "Working on this computer only";
-    const hostText = hosting.running
-      ? `Hosting a server &middot; <button class="auth-link" id="hostButton">Manage</button>`
-      : `<button class="auth-link" id="hostButton">Host a server on this computer</button>`;
-    line.innerHTML = `${text} &middot; <button class="auth-link" id="serverChangeButton">${serverMode ? "Change server" : "Connect to a server"}</button><br />${hostText}`;
-    document
-      .getElementById("serverChangeButton")
-      .addEventListener("click", () => showServerModal(settings));
-    document.getElementById("hostButton").addEventListener("click", () => showHostModal(hosting));
-  });
+  Promise.all([api().get_server_settings(), api().get_hosting(), api().get_version_info()]).then(
+    ([settings, hosting, version]) => {
+      serverMode = settings.mode === "server";
+      const text = serverMode
+        ? `Connected to <strong>${escapeHtml(settings.url)}</strong>`
+        : "Working on this computer only";
+      const hostText = hosting.running
+        ? `Hosting a server &middot; <button class="auth-link" id="hostButton">Manage</button>`
+        : `<button class="auth-link" id="hostButton">Host a server on this computer</button>`;
+      const mismatch =
+        version.server && version.server.compatible === false
+          ? `<span class="auth-error" role="alert">${escapeHtml(version.server.message)}</span><br />`
+          : "";
+      line.innerHTML = `${text} &middot; <button class="auth-link" id="serverChangeButton">${serverMode ? "Change server" : "Connect to a server"}</button><br />${hostText}<br />${mismatch}<span class="version-line">CAVY ${escapeHtml(version.app)}</span>`;
+      document
+        .getElementById("serverChangeButton")
+        .addEventListener("click", () => showServerModal(settings));
+      document.getElementById("hostButton").addEventListener("click", () => {
+        // Know about a newer version before the person starts serving a class.
+        (updateInfo ? Promise.resolve(updateInfo) : refreshUpdateInfo()).then(() => showHostModal(hosting));
+      });
+    }
+  );
 }
 
 function showHostModal(hosting) {
@@ -237,6 +312,13 @@ function showHostModal(hosting) {
   overlay.innerHTML = `
     <div class="modal-card">
       <h2>${running ? "This computer is hosting CAVY" : "Host a classroom server"}</h2>
+      ${
+        updateIsAvailable()
+          ? `<div class="notice notice-warn" id="hostOutdated"><strong>A newer CAVY (${escapeHtml(updateInfo.latest)}) is available.</strong>
+             This computer has ${escapeHtml(updateInfo.current)}. Every computer that connects must run <em>exactly the same version</em> as the server, and a different one is refused. Update this computer first, then ask everyone else to update too.
+             <button class="auth-link" id="hostDownload">Download ${escapeHtml(updateInfo.latest)}</button></div>`
+          : ""
+      }
       ${
         running
           ? `<p class="muted">Other computers connect with this address (they type it into <em>Connect to a server</em> on their login screen):</p>
@@ -253,7 +335,7 @@ function showHostModal(hosting) {
         ${
           running
             ? `<button class="ghost" id="hostStop">Stop server</button><button class="primary" id="hostAdmin">Open admin panel</button>`
-            : `<button class="primary" id="hostStart">Start server</button>`
+            : `<button class="primary" id="hostStart">${updateIsAvailable() ? "Start anyway" : "Start server"}</button>`
         }
       </div>
     </div>`;
@@ -282,11 +364,13 @@ function showHostModal(hosting) {
         })
         .catch((err) => {
           start.disabled = false;
-          start.textContent = "Start server";
+          start.textContent = updateIsAvailable() ? "Start anyway" : "Start server";
           errorEl.textContent = errorText(err);
         });
     });
   }
+  const hostDownload = document.getElementById("hostDownload");
+  if (hostDownload) hostDownload.addEventListener("click", () => openUpdatePage());
   const stop = document.getElementById("hostStop");
   if (stop) {
     stop.addEventListener("click", () => {
@@ -675,9 +759,13 @@ function showCreateAccount() {
           : `<label>Enrolment No. <span class="muted">(optional)</span> <input type="text" id="createEnrollment" placeholder="e.g. BSC2026007" /></label>`;
         if (signupCourses.length) wireCohortSelects("signup", signupCourses);
       })
-      .catch(() => {
+      .catch((err) => {
         const host = document.getElementById("cohortFields");
-        if (host) host.innerHTML = `<p class="muted">Couldn't load the course list. Check the server connection and try again.</p>`;
+        const mismatch = /same version/i.test(errorText(err));
+        if (host)
+          host.innerHTML = `<p class="${mismatch ? "auth-error" : "muted"}">${escapeHtml(
+            mismatch ? errorText(err) : "Couldn't load the course list. Check the server connection and try again."
+          )}</p>`;
       });
   }
 
@@ -4206,6 +4294,7 @@ function enterApp(role, name, mustChangePassword = false, needsDetails = false) 
 
 function init() {
   showLogin();
+  startUpdateChecks();
 }
 
 // -- Dialogs and live regions (accessibility) ---------------------------------------

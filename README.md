@@ -134,6 +134,14 @@ fetched with `python scripts/fetch_monaco.py` (the app falls back to a plain tex
 administrator password is created with `get-admin-password.command` (macOS) or `get-admin-password.bat`
 (Windows), or `python -m eaal_platform.server --reset-admin-password`.
 
+## Updates
+
+From version 0.2.0 the app tells you when a newer CAVY is released (one small notice, never during a lab) and
+links to the download. A server and the apps that connect to it must run exactly the same version, otherwise
+the connection is refused with a message saying which side to update, and hosting a server warns first when a
+newer version exists. How to publish an update (change the version, push a tag) is in
+[docs/RELEASING.md](docs/RELEASING.md).
+
 ## How it is built
 
 Python backend, web front end, one native window. [pywebview](https://pywebview.flowrl.com/) shows the HTML

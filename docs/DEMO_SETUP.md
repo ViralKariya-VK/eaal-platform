@@ -24,6 +24,10 @@ Four computers on one network (it also works with fewer):
 
 ---
 
+> **Updating later.** Installed apps (0.2.0 and newer) show a notice when a newer version is released.
+> Everything in a class must run the same version, so update the computer that hosts the server first, then
+> the others. See [RELEASING.md](RELEASING.md).
+
 ## 1. Get the installers
 
 You build them with GitHub, no Windows machine needed:

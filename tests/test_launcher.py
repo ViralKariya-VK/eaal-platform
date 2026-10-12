@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from eaal_platform import launcher
+from eaal_platform.buildinfo import VERSION
 
 
 def test_missing_output_streams_are_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,4 +47,4 @@ def test_the_version_flag_reports_the_build(capsys: pytest.CaptureFixture[str]) 
         sys.argv = old
     out = capsys.readouterr().out.strip()
     assert out == buildinfo.describe()
-    assert out.startswith("CAVY 0.1.0 (commit ")
+    assert out.startswith(f"CAVY {VERSION} (commit ")

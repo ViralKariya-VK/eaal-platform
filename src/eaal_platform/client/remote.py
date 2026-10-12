@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from eaal_platform.buildinfo import VERSION, VERSION_HEADER
+
 _TIMEOUT = httpx.Timeout(60.0, connect=5.0)  # AI replies and scoring can be slow
 _POLL_TIMEOUT = httpx.Timeout(40.0, connect=5.0)  # the server holds a poll open for ~25 s
 
@@ -15,12 +17,17 @@ class ServerUnreachableError(ConnectionError):
     """The server couldn't be contacted (wrong address, offline, firewall...)."""
 
 
+class VersionMismatchError(ValueError):
+    """This app and the server run different versions of CAVY, so they must not work together."""
+
+
 class RemoteBackend:
     """Same method names as ``CavyApi``, executed on the server."""
 
     def __init__(self, base_url: str, http: httpx.Client | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = http or httpx.Client(timeout=_TIMEOUT)
+        self._http.headers[VERSION_HEADER] = VERSION  # the server refuses a different version
         self._token: str | None = None
         # Why the server ended our session (e.g. "signed out by an administrator"),
         # kept so every later call explains itself instead of failing vaguely.
@@ -41,15 +48,22 @@ class RemoteBackend:
         headers = {"Authorization": f"Bearer {self._token}"} if auth and self._token else {}
         try:
             if timeout is None:
-                return self._http.post(f"{self.base_url}{path}", json=body, headers=headers)
-            return self._http.post(
-                f"{self.base_url}{path}", json=body, headers=headers, timeout=timeout
-            )
+                response = self._http.post(f"{self.base_url}{path}", json=body, headers=headers)
+            else:
+                response = self._http.post(
+                    f"{self.base_url}{path}", json=body, headers=headers, timeout=timeout
+                )
+            return self._check_version(response)
         except httpx.HTTPError as exc:
             raise ServerUnreachableError(
                 f"Can't reach the CAVY server at {self.base_url}. "
                 "Check that it is running and you are on the same network."
             ) from exc
+
+    def _check_version(self, response: httpx.Response) -> httpx.Response:
+        if response.status_code == 426:
+            raise VersionMismatchError(self._error_message(response))
+        return response
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:
@@ -100,7 +114,7 @@ class RemoteBackend:
     def get_academic_options(self) -> list[dict[str, Any]]:
         """The sign-up form's dropdown lists (needs no sign-in)."""
         try:
-            response = self._http.get(f"{self.base_url}/api/academic")
+            response = self._check_version(self._http.get(f"{self.base_url}/api/academic"))
         except httpx.HTTPError as exc:
             raise ServerUnreachableError(
                 f"Can't reach the CAVY server at {self.base_url}."
@@ -113,7 +127,7 @@ class RemoteBackend:
     def get_signup_info(self) -> dict[str, Any]:
         """Whether this server emails students their first login (needs no sign-in)."""
         try:
-            response = self._http.get(f"{self.base_url}/api/signup_info")
+            response = self._check_version(self._http.get(f"{self.base_url}/api/signup_info"))
         except httpx.HTTPError as exc:
             raise ServerUnreachableError(
                 f"Can't reach the CAVY server at {self.base_url}."
