@@ -558,11 +558,17 @@ def ensure_years_current(session_factory: sessionmaker[OrmSession]) -> None:
 def lab_visible_to(student: Student, task: Task) -> bool:
     """Whether ``task`` is meant for ``student``."""
     if task.course_id is not None:
-        return (
+        in_cohort = (
             student.course_id == task.course_id
             and (task.year is None or student.year == task.year)
             and (task.division is None or student.division == task.division)
             and (task.batch is None or student.batch == task.batch)
+        )
+        # A lab made by a professor on a server goes only to students that professor teaches.
+        if task.professor_id is None:
+            return in_cohort
+        return in_cohort and any(
+            link.professor_id == task.professor_id for link in student.class_links
         )
     if task.professor_id is not None:
         return any(link.professor_id == task.professor_id for link in student.class_links)

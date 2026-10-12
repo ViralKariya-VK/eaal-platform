@@ -1211,7 +1211,7 @@ async function manageCourse(courseId) {
 
 function showTeaching() {
   return guarded(async () => {
-    const data = await get("/teaching");
+    const [data, year] = await Promise.all([get("/teaching"), get("/academic-year")]);
     const bySubject = (id) => data.subjects.find((s) => s.id === id);
     const rows = data.assignments.map((a) => {
       const subject = bySubject(a.subject_id);
@@ -1242,6 +1242,9 @@ function showTeaching() {
         }</div>
       <div class="card"><h3>Allotments (${data.assignments.length})</h3>
         ${table(["Professor", "Subject", "Division", "Batch", ""], rows, { empty: "Nothing allotted yet." })}</div>
+      <div class="card"><h3>Academic year ${esc(year.academic_year)}</h3>
+        <p class="muted">Students move up by themselves on ${esc(year.next_promotion)}. Teaching allotments stay as they are, and the new first-years join the professors who teach the first-year subjects.</p>
+        ${table(["Course", "Year", "Semester now", "Students"], year.rows.map((r) => [esc(r.course), esc(String(r.year)), r.semester ? `Sem ${r.semester}` : "—", r.students]), { empty: "No students yet." })}</div>
       <div class="card"><h3>Subjects</h3>
         ${table(
           ["Course", "Semester", "Subject", ""],

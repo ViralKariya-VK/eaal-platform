@@ -77,6 +77,7 @@ TOPIC_RESOURCES = "resources"  # shared material or class membership changed
 _METHOD_TOPICS: dict[str, tuple[str, ...]] = {
     "create_lab": (TOPIC_LABS,),
     "update_lab": (TOPIC_LABS,),
+    "duplicate_lab": (TOPIC_LABS,),
     "archive_lab": (TOPIC_LABS,),
     "unarchive_lab": (TOPIC_LABS,),
     "create_followup_assessment": (TOPIC_LABS,),

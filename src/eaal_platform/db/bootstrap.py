@@ -30,6 +30,7 @@ from eaal_platform.auth import (
     password_problem,
     verify_password,
 )
+from eaal_platform.db import teaching
 from eaal_platform.db.academics import assign_by_groups
 from eaal_platform.db.models import (
     Admin,
@@ -109,6 +110,7 @@ def create_student_account(
         new_id = student.id
     if cohort:
         assign_by_groups(session_factory, new_id)
+        teaching.sync(session_factory)
     return new_id
 
 

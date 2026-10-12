@@ -93,6 +93,7 @@ def create_db_engine(db_path: Path | None = None) -> Engine:
 # place or the app would crash on first query. (table, column, SQL type)
 _ADDED_COLUMNS = (
     ("tasks", "archived_at", "DATETIME"),
+    ("tasks", "opens_at", "DATETIME"),
     ("students", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
     ("professors", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
     ("students", "disabled", "BOOLEAN NOT NULL DEFAULT 0"),

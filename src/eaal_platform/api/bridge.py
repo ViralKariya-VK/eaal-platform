@@ -128,6 +128,20 @@ def _is_lab(task: Task) -> bool:
     return bool(task.stages) and task.assessment_kind is None
 
 
+def _parse_opens_at(value: Any) -> datetime | None:
+    """A start time typed on the form (``2026-10-14T10:30``); empty means "right away"."""
+    if value in (None, ""):
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
+    except ValueError as exc:
+        raise ValueError("That start time isn't a valid date and time.") from exc
+
+
+def _opens_label(opens_at: datetime | None) -> str | None:
+    return opens_at.strftime("%a %d %b, %H:%M") if opens_at else None
+
+
 def _is_archived(task: Task) -> bool:
     parent = task.linked_task
     return task.archived_at is not None or (parent is not None and parent.archived_at is not None)
@@ -798,6 +812,9 @@ class CavyApi:
                     "learning_objective": task.learning_objective,
                     "professor_name": task.professor_name,
                     "stage_count": len(task.stages),
+                    "opens_at": task.opens_at.isoformat() if task.opens_at else None,
+                    "opens_label": _opens_label(task.opens_at),
+                    "not_open_yet": bool(task.opens_at and task.opens_at > datetime.now()),
                     "status": self._lab_status(db_session, student_id, task),
                 }
                 for task in tasks
@@ -982,9 +999,21 @@ class CavyApi:
         Learning/Exploration/Assessment order.
         """
         professor_id = self._require_professor_id()
+        per_batch = lab.get("per_batch")
+        if isinstance(per_batch, dict) and per_batch:
+            # One lab for each batch, each with its own start time.
+            ids: list[int] = []
+            for batch, opens_at in per_batch.items():
+                one = {**lab, "per_batch": None, "batch": batch, "opens_at": opens_at}
+                result = self.create_lab(one)
+                if not result.get("ok"):
+                    return result
+                ids.append(int(result["task_id"]))
+            return {"ok": True, "task_id": ids[0], "task_ids": ids}
         try:
             title = _clean_title(lab.get("title"))
             target = self._lab_target(professor_id, lab)
+            opens_at = _parse_opens_at(lab.get("opens_at"))
         except (ValueError, academics.AcademicError) as exc:
             return {"ok": False, "error": str(exc)}
         stage_inputs = lab.get("stages") or []
@@ -1020,6 +1049,8 @@ class CavyApi:
             # class; on a single computer everyone sees every lab.
             professor_id=professor_id if self._restrict_signup else None,
         )
+        if opens_at is not None:
+            self._set_opens_at([task_id], opens_at)
         return {"ok": True, "task_id": task_id}
 
     def _lab_target(self, professor_id: int, lab: dict[str, Any]) -> dict[str, Any]:
@@ -1073,6 +1104,7 @@ class CavyApi:
                 "topic": task.learning_objective,
                 "description": task.description,
                 "difficulty": task.difficulty,
+                "opens_at": task.opens_at.strftime("%Y-%m-%dT%H:%M") if task.opens_at else None,
                 "archived": _is_archived(task),
                 "stages": [
                     {
@@ -1115,9 +1147,39 @@ class CavyApi:
                 course_id=target["course_id"],
                 year=target["year"],
             )
+            self._set_opens_at([task_id], _parse_opens_at(lab.get("opens_at")))
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
+
+    def _set_opens_at(self, task_ids: list[int], opens_at: datetime | None) -> None:
+        with self._session_factory() as db_session:
+            for task_id in task_ids:
+                task = db_session.get(Task, task_id)
+                if task is not None:
+                    task.opens_at = opens_at
+            db_session.commit()
+
+    def duplicate_lab(self, task_id: int, changes: dict[str, Any]) -> dict[str, Any]:
+        """Copy a lab to another division / batch / start time, with everything else the same.
+
+        ``changes`` may hold ``division``, ``batch``, ``year`` and ``opens_at``.
+        """
+        self._require_professor_id()
+        lab = self.get_lab(task_id)
+        lab.pop("id", None)
+        lab["title"] = changes.get("title") or lab["title"]
+        for key in ("division", "batch", "year", "opens_at"):
+            if key in changes:
+                lab[key] = changes[key]
+        lab["stages"] = [
+            {
+                "duration_minutes": s["duration_minutes"],
+                "ai_assistance_mode": s["ai_assistance_mode"],
+            }
+            for s in lab["stages"]
+        ]
+        return self.create_lab(lab)
 
     def archive_lab(self, task_id: int) -> dict[str, Any]:
         self._require_professor_id()
@@ -1360,6 +1422,9 @@ class CavyApi:
             if _is_archived(target.task):
                 raise ValueError("This lab has been archived by your professor.")
             self._require_lab_access(db_session, student_id, target.task)
+            opens_at = target.task.opens_at
+            if opens_at is not None and opens_at.replace(tzinfo=None) > datetime.now():
+                raise ValueError(f"This lab opens on {_opens_label(opens_at)}.")
             if self._final_submission(db_session, student_id, target.task) is not None:
                 raise ValueError("You have already submitted this lab.")
         session_id, resumed = resume_or_start_stage_session(

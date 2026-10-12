@@ -1872,6 +1872,7 @@ function labsTableRows(labs, manage) {
         ${
           manage
             ? `<button class="ghost edit-lab-button" data-task-id="${lab.id}">Edit</button>
+               <button class="ghost copy-lab-button" data-task-id="${lab.id}" title="Make a copy for another division, batch or time">Duplicate</button>
                <button class="ghost archive-lab-button" data-task-id="${lab.id}" data-title="${escapeHtml(lab.title)}" data-archived="${lab.archived ? "1" : "0"}">${lab.archived ? "Restore" : "Archive"}</button>`
             : ""
         }
@@ -1935,6 +1936,9 @@ function renderLabsScreen(navKey, heading, subtitle, eyebrow, showCreateButton) 
         });
         document.querySelectorAll(".edit-lab-button").forEach((btn) => {
           btn.addEventListener("click", () => showEditSession(Number(btn.dataset.taskId)));
+        });
+        document.querySelectorAll(".copy-lab-button").forEach((btn) => {
+          btn.addEventListener("click", () => showEditSession(Number(btn.dataset.taskId), true));
         });
         document.querySelectorAll(".archive-lab-button").forEach((btn) => {
           btn.addEventListener("click", () => {
@@ -2413,10 +2417,23 @@ const AI_MODE_OPTIONS = [
   { value: "NONE", label: "No Assistance" },
 ];
 
-function showEditSession(taskId) {
+// ``copy``: open the lab's details as a new lab (another division, batch or start time).
+function showEditSession(taskId, copy = false) {
   api()
     .get_lab(taskId)
-    .then((lab) => showCreateSession(lab));
+    .then((lab) =>
+      showCreateSession(
+        copy
+          ? {
+              ...lab,
+              copy: true,
+              title: `${lab.title} (copy)`,
+              opens_at: null,
+              stages: lab.stages.map((stage) => ({ ...stage, mode_locked: false })),
+            }
+          : lab
+      )
+    );
 }
 
 function showCreateSession(existing = null) {
@@ -2427,7 +2444,7 @@ function showCreateSession(existing = null) {
 }
 
 function renderCreateSession(existing, courses) {
-  const editing = existing !== null;
+  const editing = existing !== null && !existing.copy;
   const savedStage = (type) => (existing ? existing.stages.find((s) => s.stage_type === type) : null);
   const stageCards = STAGE_CONFIG.map((stage) => {
     const saved = savedStage(stage.type);
@@ -2479,7 +2496,7 @@ function renderCreateSession(existing, courses) {
               <label>Year <select id="sessionYear"></select></label>
               <label>Division <select id="sessionDivision"></select></label>
               <label>Batch <select id="sessionBatch"></select></label>
-              <p class="muted span-2" style="margin:0;">Only students in this course (and the year, division and batch you pick) will get this lab.</p>`
+              <p class="muted span-2" style="margin:0;">Only students in this course (and the year, division and batch you pick) will get this lab. "Any batch" means both batches.</p>`
             : serverMode
               ? `<label>Topic
                   <input type="text" id="sessionTopic" placeholder="Enter topic" />
@@ -2497,6 +2514,22 @@ function renderCreateSession(existing, courses) {
                 <label>Batch
                   <input type="text" id="sessionBatch" placeholder="e.g. 2026" />
                 </label>`
+        }
+        ${
+          courses.length || serverMode
+            ? `<label>Opens at (optional)
+                <input type="datetime-local" id="sessionOpens" />
+                <span class="muted">Students can see the lab earlier but can only start it from this time. Empty means right away.</span>
+              </label>
+              ${
+                courses.length && !editing
+                  ? `<div class="span-2" id="perBatchRow" hidden>
+                      <label class="inline-check"><input type="checkbox" id="perBatch" /> Give each batch its own start time (one lab is made per batch)</label>
+                      <div id="perBatchBox" class="group-form" hidden></div>
+                    </div>`
+                  : ""
+              }`
+            : ""
         }
         <label>Difficulty
           <select id="sessionDifficulty">
@@ -2581,8 +2614,16 @@ function renderCreateSession(existing, courses) {
       topic: document.getElementById("sessionTopic").value.trim() || null,
       description: document.getElementById("sessionDescription").value.trim() || null,
       difficulty: document.getElementById("sessionDifficulty").value,
+      opens_at: text("sessionOpens"),
       stages,
     };
+    const perBatchOn = perBatchRow && !perBatchRow.hidden && document.getElementById("perBatch").checked;
+    if (perBatchOn) {
+      payload.per_batch = {};
+      document.querySelectorAll("[data-batch-opens]").forEach((input) => {
+        payload.per_batch[input.dataset.batchOpens] = input.value || null;
+      });
+    }
 
     if (!editing) {
       runOnce(createButton, () =>
@@ -2617,9 +2658,24 @@ function renderCreateSession(existing, courses) {
     );
   });
 
-  if (courses.length) wireCohortSelects("session", courses, { current: editing ? existing : {}, anyLabels: true });
+  const perBatchRow = document.getElementById("perBatchRow");
+  const refreshPerBatch = () => {
+    if (!perBatchRow) return;
+    const course = courses.find((c) => String(c.id) === document.getElementById("sessionCourse").value);
+    const anyBatch = !document.getElementById("sessionBatch").value;
+    const batches = course ? course.batches.map((b) => b.name) : [];
+    perBatchRow.hidden = !(anyBatch && batches.length > 1);
+    document.getElementById("perBatchBox").innerHTML = batches
+      .map((name) => `<label>Batch ${escapeHtml(name)} opens at <input type="datetime-local" data-batch-opens="${escapeHtml(name)}" /></label>`)
+      .join("");
+    document.getElementById("perBatchBox").hidden = perBatchRow.hidden || !document.getElementById("perBatch").checked;
+  };
+  if (courses.length) {
+    wireCohortSelects("session", courses, { current: existing || {}, anyLabels: true, onChange: refreshPerBatch });
+    if (perBatchRow) document.getElementById("perBatch").addEventListener("change", refreshPerBatch);
+  }
 
-  if (editing) {
+  if (existing) {
     const set = (id, value) => {
       const field = document.getElementById(id);
       if (field) field.value = value || "";
@@ -2631,6 +2687,7 @@ function renderCreateSession(existing, courses) {
       set("sessionBatch", existing.batch);
     }
     set("sessionTopic", existing.topic);
+    set("sessionOpens", existing.opens_at);
     set("sessionDescription", existing.description);
     if (existing.difficulty) document.getElementById("sessionDifficulty").value = existing.difficulty;
   }
@@ -2954,6 +3011,7 @@ function showLabs() {
           ${lab.learning_objective ? `<p class="muted">${escapeHtml(lab.learning_objective)}</p>` : ""}
           <div class="meta-row">${icon("person")}${lab.professor_name ? escapeHtml(lab.professor_name) : "Self-paced"}</div>
           <div class="meta-row">${icon("clock")}${lab.stage_count} stage${lab.stage_count === 1 ? "" : "s"}</div>
+          ${lab.not_open_yet ? `<div class="meta-row">${icon("clock")}Opens ${escapeHtml(lab.opens_label)}</div>` : ""}
           <span class="pill ${lab.status === "not_started" ? "pill-ready" : lab.status === "submitted" ? "pill-ready" : "pill-neutral"}">${{ not_started: "Ready to start", in_progress: "In progress", submitted: "Submitted" }[lab.status] || "Ready to start"}</span>
           <button class="primary lab-start-button">${{ in_progress: "Continue", submitted: "View" }[lab.status] || "Start"} ${icon("arrowRight")}</button>
         </div>`

@@ -8,6 +8,7 @@ the yearly promotion. It never removes anyone; a professor can remove a student 
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
@@ -174,8 +175,6 @@ def sync(session_factory: sessionmaker[OrmSession]) -> int:
 def _in_semester(student: Student, semester: int) -> bool:
     if not student.year:
         return False
-    from datetime import date
-
     return cal.semester(student.year, date.today()) == semester
 
 
@@ -221,3 +220,35 @@ def overview(session_factory: sessionmaker[OrmSession]) -> dict[str, Any]:
             ],
             "assignments": assignments,
         }
+
+
+def academic_year_summary(
+    session_factory: sessionmaker[OrmSession], today: date | None = None
+) -> dict[str, Any]:
+    """Where the college is in the academic year, and how many students sit in each year.
+
+    Students move up by themselves on 1 July (``academics.sync_student_years``); this page only
+    shows the result and the date of the next move.
+    """
+    on = today or date.today()
+    start = cal.academic_year(on)
+    with session_factory() as db:
+        courses = {c.id: c.name for c in db.query(Course)}
+        counts: dict[tuple[int, int], int] = {}
+        for student in db.query(Student).filter(Student.course_id.is_not(None)):
+            key = (student.course_id or 0, student.year or 0)
+            counts[key] = counts.get(key, 0) + 1
+    rows = [
+        {
+            "course": courses.get(course_id, "?"),
+            "year": year or "Completed",
+            "semester": cal.semester(year, on) if year else None,
+            "students": count,
+        }
+        for (course_id, year), count in sorted(counts.items())
+    ]
+    return {
+        "academic_year": cal.academic_year_label(start),
+        "next_promotion": date(start + 1, *cal.YEAR_STARTS_ON).isoformat(),
+        "rows": rows,
+    }

@@ -665,6 +665,7 @@ def apply_plan(session_factory: sessionmaker[OrmSession], plan: Plan) -> Result:
         db.commit()
     for student_id in changed:
         academics.assign_by_groups(session_factory, student_id)
+    teaching.sync(session_factory)
     return result
 
 

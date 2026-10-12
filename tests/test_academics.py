@@ -333,6 +333,8 @@ def _server_api(factory: Factory) -> CavyApi:
 def test_a_lab_reaches_only_the_group_it_was_made_for(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    for name in ("s1", "s2", "s3"):
+        _join(db_session_factory, school["students"][name], school["a"])
     professor = _server_api(db_session_factory)
     professor.login("professor", "a@x.com", _PW)
     created = professor.create_lab(
@@ -636,3 +638,81 @@ def test_older_databases_keep_their_single_professor_as_a_class_membership(
     init_db(db_engine)
     init_db(db_engine)  # and it is safe to upgrade twice
     assert _owner(db_session_factory, student) == [prof]
+
+
+# -- start times, one lab per batch, copies, and who sees a lab ---------------------------------
+
+
+def test_a_lab_can_wait_for_its_start_time(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    _join(db_session_factory, school["students"]["s1"], school["a"])
+    teacher = _server_api(db_session_factory)
+    teacher.login("professor", "a@x.com", _PW)
+    target = {"course_id": school["course"], "year": 1, "division": "A", "batch": "A1"}
+    later = teacher.create_lab(_lab({**target, "opens_at": "2999-01-01T09:30"}))
+    assert teacher.get_lab(later["task_id"])["opens_at"] == "2999-01-01T09:30"
+    assert teacher.create_lab(_lab({**target, "opens_at": "tomorrow"}))["ok"] is False
+
+    student = _server_api(db_session_factory)
+    student.login("student", "s1@x.com", _PW)
+    card = next(lab for lab in student.get_labs() if lab["id"] == later["task_id"])
+    assert card["not_open_yet"] is True
+    stage_id = student.get_stages(later["task_id"])["stages"][0]["id"]
+    with pytest.raises(ValueError, match="opens on"):
+        student.start_stage(stage_id)
+
+
+def test_one_lab_can_be_made_per_batch_with_its_own_time(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    teacher = _server_api(db_session_factory)
+    teacher.login("professor", "a@x.com", _PW)
+    made = teacher.create_lab(
+        _lab(
+            {
+                "course_id": school["course"],
+                "year": 1,
+                "division": "A",
+                "per_batch": {"A1": "2999-01-01T09:00", "A2": "2999-01-01T11:00"},
+            }
+        )
+    )
+    assert made["ok"] is True and len(made["task_ids"]) == 2
+    times = {teacher.get_lab(i)["batch"]: teacher.get_lab(i)["opens_at"] for i in made["task_ids"]}
+    assert times == {"A1": "2999-01-01T09:00", "A2": "2999-01-01T11:00"}
+
+
+def test_a_lab_can_be_duplicated_for_another_batch(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    teacher = _server_api(db_session_factory)
+    teacher.login("professor", "a@x.com", _PW)
+    first = teacher.create_lab(
+        _lab({"course_id": school["course"], "year": 1, "division": "A", "batch": "A1"})
+    )
+    copy = teacher.duplicate_lab(first["task_id"], {"batch": "A2", "opens_at": "2999-02-02T10:00"})
+    assert copy["ok"] is True and copy["task_id"] != first["task_id"]
+    again = teacher.get_lab(copy["task_id"])
+    assert (again["batch"], again["opens_at"], again["title"]) == (
+        "A2",
+        "2999-02-02T10:00",
+        "Targeted lab",
+    )
+
+
+def test_students_only_see_labs_of_a_professor_who_teaches_them(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    academics.set_professor_courses(
+        db_session_factory, school["b"], [school["course"]], adopt=False
+    )
+    teacher_b = _server_api(db_session_factory)
+    teacher_b.login("professor", "b@x.com", _PW)
+    made = teacher_b.create_lab(_lab({"course_id": school["course"], "year": 1}))
+    student = _server_api(db_session_factory)
+    student.login("student", "s1@x.com", _PW)
+    # b's lab is aimed at s1's year, but s1 is not in professor b's class.
+    assert made["task_id"] not in {lab["id"] for lab in student.get_labs()}
+    _join(db_session_factory, school["students"]["s1"], school["b"])
+    assert made["task_id"] in {lab["id"] for lab in student.get_labs()}

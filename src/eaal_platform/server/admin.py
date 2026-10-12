@@ -870,6 +870,10 @@ def create_admin_router(state: ServerState, auth: AdminAuth | None = None) -> AP
     def teaching_overview(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
         return teaching.overview(state.session_factory)
 
+    @router.get("/academic-year")
+    def academic_year(_: _AdminSession = Depends(current_admin)) -> dict[str, Any]:
+        return teaching.academic_year_summary(state.session_factory)
+
     @router.post("/teaching/subjects/add")
     def subject_add(
         request: SubjectRequest, admin: _AdminSession = Depends(current_admin)
