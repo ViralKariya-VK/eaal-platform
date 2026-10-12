@@ -53,7 +53,7 @@ from eaal_platform.ai.provider import (
     Purpose,
 )
 from eaal_platform.auth import hash_password, password_problem, verify_password
-from eaal_platform.db import academics, app_settings, approvals
+from eaal_platform.db import academics, app_settings, approvals, teaching
 from eaal_platform.db import resources as resource_store
 from eaal_platform.db.bootstrap import (
     authenticate_professor,
@@ -498,7 +498,7 @@ class CavyApi:
 
     def _professor_must_change_password(self) -> bool:
         with self._session_factory() as db_session:
-            professor = db_session.get(Professor, self._require_professor_id())
+            professor = db_session.get(Professor, self._require_professor_id(assigned=False))
             return bool(professor and professor.must_change_password)
 
     def get_profile(self) -> dict[str, Any]:
@@ -548,8 +548,22 @@ class CavyApi:
         return {"ok": True}
 
     def get_students(self) -> list[dict[str, Any]]:
-        """The students in this professor's class."""
-        return resource_store.class_students(self._session_factory, self._require_professor_id())
+        """The students in this professor's class (on a server: the ones allotted to them)."""
+        professor_id = self._require_professor_id()
+        return self._allotted_only(
+            professor_id, resource_store.class_students(self._session_factory, professor_id)
+        )
+
+    def _allotted_only(self, professor_id: int, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """On a server a professor sees only the students an administrator allotted to them."""
+        if not self._restrict_signup:
+            return rows
+        allowed = teaching.covered_student_ids(self._session_factory, professor_id)
+        return [row for row in rows if row["id"] in allowed]
+
+    def get_my_allotments(self) -> list[dict[str, Any]]:
+        """The subjects, divisions and batches allotted to this professor, with student counts."""
+        return teaching.my_allotments(self._session_factory, self._require_professor_id())
 
     def get_unassigned_students(self) -> list[dict[str, Any]]:
         """Students not in this professor's class yet (being in other classes is fine).
@@ -561,8 +575,7 @@ class CavyApi:
             self._session_factory, professor_id
         )
         if self._restrict_signup:
-            mine = academics.professor_course_ids(self._session_factory, professor_id)
-            rows = [row for row in rows if row["course_id"] in mine]
+            return []  # on a server an administrator decides who is in a class
         return rows
 
     # -- courses, years, divisions and batches --------------------------------------
@@ -572,20 +585,27 @@ class CavyApi:
         return academics.list_courses(self._session_factory)
 
     def get_my_courses(self) -> list[dict[str, Any]]:
-        """The courses this professor may teach and aim labs at."""
-        return academics.courses_for_professor(
-            self._session_factory,
-            self._require_professor_id(),
-            every_course=not self._restrict_signup,
-        )
+        """The courses this professor may aim labs at (on a server: only what is allotted)."""
+        professor_id = self._require_professor_id(assigned=False)
+        if not self._restrict_signup:
+            return academics.courses_for_professor(
+                self._session_factory, professor_id, every_course=True
+            )
+        allotted = teaching.allotted_course_ids(self._session_factory, professor_id)
+        return [
+            teaching.narrow_course(self._session_factory, professor_id, course)
+            for course in academics.list_courses(self._session_factory, only_ids=allotted)
+        ]
 
     def get_course_catalog(self) -> list[dict[str, Any]]:
         """Every course, marked with the ones this professor teaches (for the picker)."""
-        return academics.catalog_for_professor(self._session_factory, self._require_professor_id())
+        return academics.catalog_for_professor(
+            self._session_factory, self._require_professor_id(assigned=False)
+        )
 
     def set_my_courses(self, course_ids: list[int]) -> dict[str, Any]:
         """The professor says which courses they teach; those courses' students join their class."""
-        professor_id = self._require_professor_id()
+        professor_id = self._require_professor_id(assigned=False)
         if self._restrict_signup:
             return {"ok": False, "error": "Your administrator assigns the courses you teach."}
         try:
@@ -612,6 +632,8 @@ class CavyApi:
     def add_class_group(self, group: dict[str, Any]) -> dict[str, Any]:
         """Take every student of a course / year / division / batch into this class."""
         professor_id = self._require_professor_id()
+        if self._restrict_signup:
+            return {"ok": False, "error": "An administrator decides who is in your class."}
         try:
             result = academics.add_group(
                 self._session_factory, professor_id, group, every_course=not self._restrict_signup
@@ -630,6 +652,8 @@ class CavyApi:
 
     def add_students_to_class(self, student_ids: list[int]) -> dict[str, Any]:
         professor_id = self._require_professor_id()
+        if self._restrict_signup:
+            return {"ok": False, "error": "An administrator decides who is in your class."}
         try:
             added = resource_store.add_to_class(
                 self._session_factory, professor_id, [int(i) for i in student_ids]
@@ -771,9 +795,20 @@ class CavyApi:
             raise ValueError("Not logged in as a student")
         return self._current_student_id
 
-    def _require_professor_id(self) -> int:
+    def _require_professor_id(self, *, assigned: bool = True) -> int:
+        """The signed-in professor. On a server they must also have been assigned a course by an
+        administrator (``assigned=False`` is for the calls that explain or check that)."""
         if self._current_professor_id is None:
             raise ValueError("Not logged in as a professor")
+        if (
+            assigned
+            and self._restrict_signup
+            and not teaching.has_allotment(self._session_factory, self._current_professor_id)
+        ):
+            raise ValueError(
+                "No course or subject has been allotted to you yet. You get access as soon as "
+                "an administrator allots you one."
+            )
         return self._current_professor_id
 
     def _require_session_owner(self, session_id: int) -> None:
@@ -1070,6 +1105,21 @@ class CavyApi:
         place = academics.lab_target(self._session_factory, lab)
         if place["course_id"] not in {c["id"] for c in mine}:
             raise academics.AcademicError("You haven't been assigned that course.")
+        if self._restrict_signup:
+            everything = academics.list_courses(
+                self._session_factory, only_ids={place["course_id"]}
+            )[0]
+            problem = teaching.target_problem(
+                self._session_factory,
+                professor_id,
+                place["course_id"],
+                place["year"],
+                place["division"],
+                place["batch"],
+                [b["name"] for b in everything["batches"]],
+            )
+            if problem:
+                raise academics.AcademicError(problem)
         return {
             "course": place["course_name"],
             "division": place["division"],
@@ -2078,9 +2128,11 @@ class CavyApi:
         self, db_session: OrmSession, professor_id: int, student: Student, task: Task | None = None
     ) -> bool:
         """A professor sees their own class, and (on a server) students doing their labs."""
-        if not self._restrict_signup or resource_store.is_member(
+        if not self._restrict_signup:
+            return True
+        if resource_store.is_member(
             db_session, student.id, professor_id
-        ):
+        ) and student.id in teaching.covered_student_ids(self._session_factory, professor_id):
             return True
         if task is None:
             return False
@@ -2093,7 +2145,9 @@ class CavyApi:
     def get_class_overview(self) -> list[dict[str, Any]]:
         """The class with each student's place and overall CIQ (for the My Class tree)."""
         professor_id = self._require_professor_id()
-        rows = resource_store.class_students(self._session_factory, professor_id)
+        rows = self._allotted_only(
+            professor_id, resource_store.class_students(self._session_factory, professor_id)
+        )
         for row in rows:
             totals = self._progress_for(row["id"])["totals"]
             row["overall_ciq"] = totals["average_score"]

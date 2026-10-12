@@ -141,6 +141,18 @@ def unassign(session_factory: sessionmaker[OrmSession], assignment_id: int) -> N
             db.commit()
 
 
+def _students_of(db: OrmSession, row: TeachingAssignment, subject: Subject) -> list[Student]:
+    """The students an allotment covers: right course, division, batch and current semester."""
+    query = db.query(Student).filter(
+        Student.course_id == subject.course_id,
+        Student.division == row.division,
+        Student.password_hash.is_not(None),
+    )
+    if row.batch:
+        query = query.filter(Student.batch == row.batch)
+    return [s for s in query if _in_semester(s, subject.semester)]
+
+
 def sync(session_factory: sessionmaker[OrmSession]) -> int:
     """Put every student an assignment covers into that professor's class; returns how many."""
     added = 0
@@ -155,21 +167,50 @@ def sync(session_factory: sessionmaker[OrmSession]) -> int:
                     professor_id=row.professor_id
                 )
             }
-            query = db.query(Student).filter(
-                Student.course_id == subject.course_id,
-                Student.division == row.division,
-                Student.password_hash.is_not(None),
-            )
-            if row.batch:
-                query = query.filter(Student.batch == row.batch)
-            for student in query:
-                if student.id in members or not _in_semester(student, subject.semester):
+            for student in _students_of(db, row, subject):
+                if student.id in members:
                     continue
                 db.add(ClassMember(student_id=student.id, professor_id=row.professor_id))
                 members.add(student.id)
                 added += 1
         db.commit()
     return added
+
+
+def covered_student_ids(session_factory: sessionmaker[OrmSession], professor_id: int) -> set[int]:
+    """The students this professor has been allotted (none if nothing is allotted)."""
+    ids: set[int] = set()
+    with session_factory() as db:
+        for row in db.query(TeachingAssignment).filter_by(professor_id=professor_id):
+            subject = db.get(Subject, row.subject_id)
+            if subject is not None:
+                ids.update(s.id for s in _students_of(db, row, subject))
+    return ids
+
+
+def my_allotments(
+    session_factory: sessionmaker[OrmSession], professor_id: int
+) -> list[dict[str, Any]]:
+    """A professor's allotments, each with how many students it covers right now."""
+    rows: list[dict[str, Any]] = []
+    with session_factory() as db:
+        for row in db.query(TeachingAssignment).filter_by(professor_id=professor_id):
+            subject = db.get(Subject, row.subject_id)
+            if subject is None:
+                continue
+            course = db.get(Course, subject.course_id)
+            rows.append(
+                {
+                    "id": row.id,
+                    "subject": subject.name,
+                    "course": course.name if course else "?",
+                    "semester": subject.semester,
+                    "division": row.division,
+                    "batch": row.batch,
+                    "students": len(_students_of(db, row, subject)),
+                }
+            )
+    return rows
 
 
 def _in_semester(student: Student, semester: int) -> bool:
@@ -252,3 +293,78 @@ def academic_year_summary(
         "next_promotion": date(start + 1, *cal.YEAR_STARTS_ON).isoformat(),
         "rows": rows,
     }
+
+
+def _slots(session_factory: sessionmaker[OrmSession], professor_id: int) -> list[dict[str, Any]]:
+    """Each allotment as (course, year of study, division, batch or ``None`` for both)."""
+    slots: list[dict[str, Any]] = []
+    with session_factory() as db:
+        for row in db.query(TeachingAssignment).filter_by(professor_id=professor_id):
+            subject = db.get(Subject, row.subject_id)
+            if subject is not None:
+                slots.append(
+                    {
+                        "course_id": subject.course_id,
+                        "year": (subject.semester + 1) // 2,
+                        "division": row.division,
+                        "batch": row.batch,
+                    }
+                )
+    return slots
+
+
+def has_allotment(session_factory: sessionmaker[OrmSession], professor_id: int) -> bool:
+    with session_factory() as db:
+        return db.query(TeachingAssignment).filter_by(professor_id=professor_id).first() is not None
+
+
+def allotted_course_ids(session_factory: sessionmaker[OrmSession], professor_id: int) -> set[int]:
+    return {slot["course_id"] for slot in _slots(session_factory, professor_id)}
+
+
+def narrow_course(
+    session_factory: sessionmaker[OrmSession], professor_id: int, course: dict[str, Any]
+) -> dict[str, Any]:
+    """A course as the lab form should offer it: only the years, divisions and batches allotted."""
+    slots = [s for s in _slots(session_factory, professor_id) if s["course_id"] == course["id"]]
+    years = {s["year"] for s in slots}
+    divisions = {s["division"] for s in slots}
+    every_batch = any(s["batch"] is None for s in slots)
+    batches = {s["batch"] for s in slots if s["batch"]}
+    return {
+        **course,
+        "year_options": [y for y in course["year_options"] if y["value"] in years],
+        "divisions": [d for d in course["divisions"] if d["name"] in divisions],
+        "batches": [b for b in course["batches"] if every_batch or b["name"] in batches],
+    }
+
+
+def target_problem(
+    session_factory: sessionmaker[OrmSession],
+    professor_id: int,
+    course_id: int,
+    year: int | None,
+    division: str | None,
+    batch: str | None,
+    course_batches: list[str],
+) -> str | None:
+    """Why a lab can't be aimed there (``None`` if the professor's allotments cover it)."""
+    if year is None or not division:
+        return "Choose the year and the division from the ones allotted to you."
+    slots = [
+        s
+        for s in _slots(session_factory, professor_id)
+        if (s["course_id"], s["year"], s["division"]) == (course_id, year, division)
+    ]
+    if not slots:
+        return "That year and division aren't allotted to you."
+    if batch:
+        return (
+            None
+            if any(s["batch"] in (None, batch) for s in slots)
+            else "That batch isn't allotted to you."
+        )
+    covered = {s["batch"] for s in slots}
+    if None in covered or set(course_batches) <= covered:
+        return None
+    return "Only some batches of that division are allotted to you; choose one."

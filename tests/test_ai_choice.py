@@ -28,6 +28,7 @@ from eaal_platform.db.bootstrap import (
 from eaal_platform.db.models import AIInteraction, Stage
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.app import ServerState, create_app
+from tests.conftest import assign_any_course
 
 _PW = "hunter2-hunter2"
 _KEY = "sk-secret-student-key-123"
@@ -185,6 +186,7 @@ class Classroom:
 
         http.post = spying_post  # type: ignore[method-assign]
         create_professor_account(factory, display_name="Prof", email="p@x.com", password=_PW)
+        assign_any_course(factory, "p@x.com")
         for name in ("a", "b"):
             create_student_account(
                 factory, display_name=name.upper(), email=f"{name}@x.com", password=_PW

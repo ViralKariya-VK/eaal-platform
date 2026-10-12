@@ -14,6 +14,7 @@ from eaal_platform.db.bootstrap import (
     seed_demo_content,
 )
 from eaal_platform.events.logger import EventLogger
+from tests.conftest import assign_any_course
 
 Factory = sessionmaker[OrmSession]
 _PW = "hunter2-hunter2"
@@ -44,6 +45,7 @@ class _Writer(AIProvider):
 def _people(factory: Factory, ai: AIProvider | None = None, server: bool = False):
     seed_demo_content(factory)
     create_professor_account(factory, display_name="Dr", email="p@x.com", password=_PW)
+    assign_any_course(factory, "p@x.com")
     create_student_account(factory, display_name="Sam", email="s@x.com", password=_PW)
     logger = EventLogger(factory, batch_size=1, flush_interval=0.1)
     logger.start()
@@ -208,7 +210,18 @@ def test_class_overview_and_progress_follow_the_class(db_session_factory: Factor
     with pytest.raises(ValueError, match="isn't in your class"):
         professor.get_student_progress(1)
 
-    professor.add_students_to_class([1])  # (not limited to courses: none exist here)
+    from eaal_platform.db import academics, teaching
+    from eaal_platform.db.models import Student
+
+    course = academics.add_course(db_session_factory, "Course", 3)
+    with db_session_factory() as db:
+        sam = db.get(Student, 1)
+        assert sam is not None
+        sam.course_id, sam.year, sam.division = course, 1, "A"
+        db.commit()
+    subject = teaching.add_subject(db_session_factory, course, 1, "Probe")
+    db_session_factory().close()
+    teaching.assign(db_session_factory, professor._current_professor_id, subject, "A", None)
     overview = professor.get_class_overview()
     assert overview[0]["name"] == "Sam" and overview[0]["sessions_submitted"] == 3
     progress = professor.get_student_progress(1)

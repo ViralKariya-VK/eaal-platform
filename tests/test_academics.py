@@ -23,6 +23,7 @@ from eaal_platform.db.bootstrap import (
 from eaal_platform.db.models import ClassMember
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.app import ServerState, create_app
+from tests.conftest import allot
 
 Factory = sessionmaker[OrmSession]
 _PW = "hunter2-hunter2"
@@ -326,6 +327,12 @@ def _lab(target: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _allotted(factory: Factory, school: dict[str, Any]) -> None:
+    """An administrator allots professor a division A of both years (no student is moved)."""
+    for year in (1, 2):
+        allot(factory, school["a"], school["course"], year=year)
+
+
 def _server_api(factory: Factory) -> CavyApi:
     return CavyApi(factory, EventLogger(factory), restrict_signup=True)
 
@@ -333,6 +340,7 @@ def _server_api(factory: Factory) -> CavyApi:
 def test_a_lab_reaches_only_the_group_it_was_made_for(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     for name in ("s1", "s2", "s3"):
         _join(db_session_factory, school["students"][name], school["a"])
     professor = _server_api(db_session_factory)
@@ -367,6 +375,7 @@ def test_a_lab_reaches_only_the_group_it_was_made_for(
 def test_a_professor_must_aim_a_lab_at_one_of_their_courses(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     other = academics.add_course(db_session_factory, "Degree", 3)
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
@@ -376,44 +385,55 @@ def test_a_professor_must_aim_a_lab_at_one_of_their_courses(
 
     nobody = _server_api(db_session_factory)
     nobody.login("professor", "b@x.com", _PW)
-    # No courses assigned: the lab simply goes to their own class.
-    made = nobody.create_lab(_lab({}))
-    assert made["ok"] is True
-    mine = _server_api(db_session_factory)
-    mine.login("student", "s1@x.com", _PW)
-    assert "Targeted lab" not in {lab["title"] for lab in mine.get_labs()}
-    _join(db_session_factory, school["students"]["s1"], school["b"])
-    assert "Targeted lab" in {lab["title"] for lab in mine.get_labs()}
+    # No courses assigned: nothing works until an administrator assigns one.
+    with pytest.raises(ValueError, match="has been allotted"):
+        nobody.create_lab(_lab({}))
 
 
 def test_editing_a_lab_can_change_its_group(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
-    task_id = teacher.create_lab(_lab({"course_id": school["course"], "year": 1}))["task_id"]
-    result = teacher.update_lab(task_id, _lab({"course_id": school["course"], "year": 2}))
+    group = {"course_id": school["course"], "division": "A"}
+    task_id = teacher.create_lab(_lab({**group, "year": 1}))["task_id"]
+    result = teacher.update_lab(task_id, _lab({**group, "year": 2}))
     assert result["ok"] is True
     assert teacher.get_lab(task_id)["year"] == 2
-    bad = teacher.update_lab(task_id, _lab({"course_id": school["course"], "year": 9}))
+    bad = teacher.update_lab(task_id, _lab({**group, "year": 9}))
     assert bad["ok"] is False
 
 
-def test_unassigned_students_are_limited_to_a_professors_courses(
+def test_on_a_server_only_an_administrator_decides_who_is_in_a_class(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
-    other = _course(db_session_factory, "Degree", 3)
-    create_student_account(
-        db_session_factory,
-        display_name="deg",
-        email="deg@x.com",
-        password=_PW,
-        cohort=academics.signup_cohort(db_session_factory, _place(other)),
-    )
+    _allotted(db_session_factory, school)
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
-    emails = {s["email"] for s in teacher.get_unassigned_students()}
-    assert "deg@x.com" not in emails and "s1@x.com" in emails
+    assert teacher.get_unassigned_students() == []
+    added = teacher.add_students_to_class([school["students"]["s1"]])
+    assert added["ok"] is False and "administrator" in added["error"]
+    assert teacher.add_class_group({"course_id": school["course"]})["ok"] is False
+
+
+def test_a_professor_sees_only_the_students_allotted_to_them(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    from eaal_platform.db import teaching
+
+    subject = teaching.add_subject(db_session_factory, school["course"], 1, "Probe")
+    # s1 (year 1, batch A1) and s3 (year 2) are in the class; only s1 is in batch A1 of year 1.
+    for name in ("s1", "s2", "s3"):
+        _join(db_session_factory, school["students"][name], school["a"])
+    teaching.assign(db_session_factory, school["a"], subject, "A", "A1")
+    teacher = _server_api(db_session_factory)
+    teacher.login("professor", "a@x.com", _PW)
+    assert [row["name"] for row in teacher.get_students()] == ["s1"]
+    assert [row["name"] for row in teacher.get_class_overview()] == ["s1"]
+    assert teacher.get_my_allotments()[0]["students"] == 1
+    with pytest.raises(ValueError, match="isn't in your class"):
+        teacher.get_student_progress(school["students"]["s2"])
 
 
 # -- the admin panel -----------------------------------------------------------------------
@@ -647,6 +667,7 @@ def test_older_databases_keep_their_single_professor_as_a_class_membership(
 def test_a_lab_can_wait_for_its_start_time(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     _join(db_session_factory, school["students"]["s1"], school["a"])
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
@@ -667,6 +688,7 @@ def test_a_lab_can_wait_for_its_start_time(
 def test_one_lab_can_be_made_per_batch_with_its_own_time(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
     made = teacher.create_lab(
@@ -687,6 +709,7 @@ def test_one_lab_can_be_made_per_batch_with_its_own_time(
 def test_a_lab_can_be_duplicated_for_another_batch(
     db_session_factory: Factory, school: dict[str, Any]
 ) -> None:
+    _allotted(db_session_factory, school)
     teacher = _server_api(db_session_factory)
     teacher.login("professor", "a@x.com", _PW)
     first = teacher.create_lab(
@@ -710,10 +733,40 @@ def test_students_only_see_labs_of_a_professor_who_teaches_them(
     )
     teacher_b = _server_api(db_session_factory)
     teacher_b.login("professor", "b@x.com", _PW)
-    made = teacher_b.create_lab(_lab({"course_id": school["course"], "year": 1}))
+    allot(db_session_factory, school["b"], school["course"])
+    made = teacher_b.create_lab(_lab({"course_id": school["course"], "year": 1, "division": "A"}))
     student = _server_api(db_session_factory)
     student.login("student", "s1@x.com", _PW)
     # b's lab is aimed at s1's year, but s1 is not in professor b's class.
     assert made["task_id"] not in {lab["id"] for lab in student.get_labs()}
     _join(db_session_factory, school["students"]["s1"], school["b"])
     assert made["task_id"] in {lab["id"] for lab in student.get_labs()}
+
+
+def test_a_professor_with_nothing_assigned_cannot_use_the_server(
+    db_session_factory: Factory, school: dict[str, Any]
+) -> None:
+    waiting = _server_api(db_session_factory)
+    waiting.login("professor", "b@x.com", _PW)
+    for call in (
+        lambda: waiting.create_lab(_lab({})),
+        waiting.get_professor_labs,
+        waiting.get_students,
+        waiting.get_class_overview,
+        waiting.get_my_resources,
+    ):
+        with pytest.raises(ValueError, match="has been allotted"):
+            call()
+    assert waiting.get_my_courses() == []
+
+    allot(db_session_factory, school["b"], school["course"])
+    assert waiting.get_professor_labs()  # allotted now: the same session just works
+
+    # Taking the allotment away locks them out again without any restart.
+    from eaal_platform.db.models import TeachingAssignment
+
+    with db_session_factory() as db:
+        db.query(TeachingAssignment).filter_by(professor_id=school["b"]).delete()
+        db.commit()
+    with pytest.raises(ValueError, match="has been allotted"):
+        waiting.get_professor_labs()

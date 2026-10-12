@@ -22,6 +22,7 @@ from eaal_platform.db.bootstrap import (
 from eaal_platform.db.models import Admin, EventType
 from eaal_platform.events.logger import EventLogger, PendingEvent
 from eaal_platform.server.app import ServerState, create_app
+from tests.conftest import assign_any_course
 
 _PASSWORD = "hunter2-hunter2"
 
@@ -317,6 +318,7 @@ def test_updates_wake_when_a_lab_is_created(server: tuple[TestClient, ServerStat
     create_student_account(
         state.session_factory, display_name="S", email="s@x.com", password=_PASSWORD
     )
+    course_id = assign_any_course(state.session_factory, "p@x.com")
     professor = _app_login(http, "professor", "p@x.com")
     student = _app_login(http, "student", "s@x.com")
 
@@ -332,8 +334,10 @@ def test_updates_wake_when_a_lab_is_created(server: tuple[TestClient, ServerStat
     waiter.start()
     lab = {
         "title": "Live lab",
-        "course": "CS",
+        "course_id": course_id,
+        "year": 1,
         "division": "A",
+        "course": "CS",
         "batch": "1",
         "topic": "t",
         "description": "d",
@@ -609,6 +613,8 @@ def test_admin_assigns_students_and_the_access_rules_follow(
     sid = create_student_account(
         state.session_factory, display_name="S", email="s@x.com", password=_PASSWORD
     )
+    assign_any_course(state.session_factory, "p1@x.com")
+    assign_any_course(state.session_factory, "p2@x.com")
     prof1 = _app_login(http, "professor", "p1@x.com")
     student = _app_login(http, "student", "s@x.com")
     http.post("/api/call/create_resource", json={"args": [_note_spec("Hello")]}, headers=prof1)
@@ -673,6 +679,7 @@ def test_resources_wake_listeners_and_appear_in_the_admin_list(
     create_professor_account(
         state.session_factory, display_name="P1", email="p1@x.com", password=_PASSWORD
     )
+    assign_any_course(state.session_factory, "p1@x.com")
     prof = _app_login(http, "professor", "p1@x.com")
     before = http.post("/api/updates", json={"versions": {}, "wait": False}, headers=prof).json()[
         "versions"
@@ -709,6 +716,7 @@ def test_file_bytes_never_appear_in_the_database_browser(
     create_professor_account(
         state.session_factory, display_name="P1", email="p1@x.com", password=_PASSWORD
     )
+    assign_any_course(state.session_factory, "p1@x.com")
     prof = _app_login(http, "professor", "p1@x.com")
     spec = {
         "kind": "FILE",

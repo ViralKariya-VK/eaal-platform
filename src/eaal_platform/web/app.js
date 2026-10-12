@@ -645,7 +645,7 @@ function cohortSelectOptions(items, label) {
 }
 
 // Fills `<prefix>Year / Division / Batch` from the course chosen in `<prefix>Course`.
-function wireCohortSelects(prefix, courses, { current = {}, anyLabels = false, onChange = null } = {}) {
+function wireCohortSelects(prefix, courses, { current = {}, anyLabels = false, strict = false, onChange = null } = {}) {
   const el = (name) => document.getElementById(`${prefix}${name}`);
   const sync = (keep) => {
     const course = courses.find((c) => String(c.id) === el("Course").value);
@@ -657,9 +657,9 @@ function wireCohortSelects(prefix, courses, { current = {}, anyLabels = false, o
       if (box && hideWhenEmpty) box.hidden = !!course && items.length === 0;
       if (selected !== null && selected !== undefined && selected !== "") select.value = String(selected);
     };
-    fill("Year", course ? course.year_options : [], anyLabels ? "Any year" : "Choose year", keep ? current.year : null, false);
-    fill("Division", course ? course.divisions.map((d) => ({ value: d.name, label: d.name })) : [], anyLabels ? "Any division" : "Choose division", keep ? current.division : null, true);
-    fill("Batch", course ? course.batches.map((b) => ({ value: b.name, label: b.name })) : [], anyLabels ? "Any batch" : "Choose batch", keep ? current.batch : null, true);
+    fill("Year", course ? course.year_options : [], anyLabels && !strict ? "Any year" : "Choose year", keep ? current.year : null, false);
+    fill("Division", course ? course.divisions.map((d) => ({ value: d.name, label: d.name })) : [], anyLabels && !strict ? "Any division" : "Choose division", keep ? current.division : null, true);
+    fill("Batch", course ? course.batches.map((b) => ({ value: b.name, label: b.name })) : [], anyLabels ? (strict ? "Both batches" : "Any batch") : "Choose batch", keep ? current.batch : null, true);
     if (onChange) onChange();
   };
   el("Course").addEventListener("change", () => sync(false));
@@ -2137,7 +2137,8 @@ function showStudents() {
     api().get_my_courses(),
     api().get_class_groups(),
     api().get_course_catalog(),
-  ]).then(([students, unassigned, myCourses, groups, catalog]) => {
+    api().get_my_allotments(),
+  ]).then(([students, unassigned, myCourses, groups, catalog, allotments]) => {
     nextRefresh = null;
     const studentRow = (student) => `
       <tr>
@@ -2166,17 +2167,28 @@ function showStudents() {
     setScreen(
       `
     <div class="page-heading"><div><h1>My class</h1><p class="subtitle">The students in your class. Only you (and an administrator) can manage them or share resources with them.</p></div></div>
-    <div class="card teaching-card">
+    ${
+      serverMode
+        ? `<div class="card teaching-card"><div>
+            <h3>Your allotments <span class="muted">· ${students.length} student${students.length === 1 ? "" : "s"} assigned to you</span></h3>
+            <p class="muted">An administrator decides which subjects, divisions and batches you teach. Only those students appear here.</p>
+            <div class="chips">${
+              allotments
+                .map((a) => `<span class="chip">${escapeHtml(a.subject)} &middot; Div ${escapeHtml(a.division)} &middot; ${a.batch ? "Batch " + escapeHtml(a.batch) : "Both batches"} &middot; ${a.students} student${a.students === 1 ? "" : "s"}</span>`)
+                .join("") || `<span class="muted">Nothing allotted yet.</span>`
+            }</div></div></div>`
+        : `<div class="card teaching-card">
       <div>
         <h3>Courses you teach</h3>
-        <p class="muted">The students of these courses join your class automatically${serverMode ? ". An administrator assigns your courses, subjects, divisions and batches." : ", now and whenever someone new picks the course."}</p>
+        <p class="muted">The students of these courses join your class automatically, now and whenever someone new picks the course.</p>
         <div class="chips">${
           catalog.filter((c) => c.teaching).map((c) => `<span class="chip">${escapeHtml(c.label)}</span>`).join("") ||
-          `<span class="muted">${serverMode ? "Nothing assigned yet." : "None yet. Choose the courses you teach to get your students."}</span>`
+          `<span class="muted">None yet. Choose the courses you teach to get your students.</span>`
         }</div>
       </div>
-      ${serverMode ? "" : `<button class="primary" id="chooseCourses">Choose courses</button>`}
-    </div>
+      <button class="primary" id="chooseCourses">Choose courses</button>
+    </div>`
+    }
     ${
       students.length
         ? `${classFilterBar(students)}<div class="class-scroll"><table class="data-table">
@@ -2184,7 +2196,7 @@ function showStudents() {
             <tbody id="classBody"></tbody></table></div>`
         : `<div class="card"><p class="muted">Nobody in your class yet. Choose your courses above, or add a group or students below.</p></div>`
     }
-    <details class="card fold" style="margin-top:20px;"><summary><h2>Add a whole group</h2></summary>
+    ${serverMode ? "" : `<details class="card fold" style="margin-top:20px;"><summary><h2>Add a whole group</h2></summary>
       <p class="subtitle">Choose a course (and a year, division or batch) and everyone in it joins your class. Students of that group who sign up later join automatically.</p>
     <div id="groupCard">
       ${
@@ -2210,8 +2222,8 @@ function showStudents() {
                .join("")}</ul>`
           : ""
       }
-    </div></details>
-    <details class="card fold" style="margin-top:12px;"><summary><h2>Add individual students</h2></summary>
+    </div></details>`}
+    ${serverMode ? "" : `<details class="card fold" style="margin-top:12px;"><summary><h2>Add individual students</h2></summary>
       <p class="subtitle">Students who aren't in your class yet${
         myCourses.length ? ", from the courses you teach" : ""
       }. A student can be in several professors' classes, one for each subject.</p>
@@ -2221,10 +2233,10 @@ function showStudents() {
           ? `<div class="check-list">${addable}</div><button class="primary" id="addToClass" style="margin-top:12px;">Add selected to my class</button>`
           : `<p class="muted">Everyone is already in your class. New students appear here after they sign up.</p>`
       }
-    </div></details>`,
+    </div></details>`}`,
       "students"
     );
-    if (myCourses.length) {
+    if (!serverMode && myCourses.length) {
       const addGroupButton = document.getElementById("addGroup");
       const preview = document.getElementById("groupPreview");
       const showPreview = () => {
@@ -2541,7 +2553,7 @@ function renderCreateSession(existing, courses) {
               <label>Year <select id="sessionYear"></select></label>
               <label>Division <select id="sessionDivision"></select></label>
               <label>Batch <select id="sessionBatch"></select></label>
-              <p class="muted span-2" style="margin:0;">Only students in this course (and the year, division and batch you pick) will get this lab. "Any batch" means both batches.</p>`
+              <p class="muted span-2" style="margin:0;">Only students in this course (and the year, division and batch you pick) will get this lab. ${serverMode ? "You can only choose what an administrator has allotted to you." : '"Any batch" means both batches.'}</p>`
             : serverMode
               ? `<label>Topic
                   <input type="text" id="sessionTopic" placeholder="Enter topic" />
@@ -2721,7 +2733,7 @@ function renderCreateSession(existing, courses) {
     document.getElementById("perBatchBox").hidden = perBatchRow.hidden || !document.getElementById("perBatch").checked;
   };
   if (courses.length) {
-    wireCohortSelects("session", courses, { current: existing || {}, anyLabels: true, onChange: refreshPerBatch });
+    wireCohortSelects("session", courses, { current: existing || {}, anyLabels: true, strict: serverMode, onChange: refreshPerBatch });
     if (perBatchRow) document.getElementById("perBatch").addEventListener("change", refreshPerBatch);
   }
 

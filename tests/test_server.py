@@ -20,6 +20,7 @@ from eaal_platform.db.bootstrap import seed_demo_content
 from eaal_platform.db.models import ClassMember, ExecutionResult, Professor, Student
 from eaal_platform.events.logger import EventLogger
 from eaal_platform.server.app import ServerState, callable_methods, create_app
+from tests.conftest import assign_any_course
 
 _PASSWORD = "hunter2-hunter2"
 
@@ -96,9 +97,11 @@ def test_student_and_professor_share_one_database(
     student.create_account("student", "Ada", "ada@example.com", _PASSWORD)
     assert professor.login("professor", "k@example.com", _PASSWORD)["ok"]
     assert student.login("student", "ada@example.com", _PASSWORD)["ok"]
-    # On a server a lab without a course goes to its professor's class.
+    # An administrator assigns the professor a course; the lab goes to that course's students.
+    course_id = assign_any_course(state.session_factory, "k@example.com")
     with state.session_factory() as db:
         ada = db.query(Student).filter_by(email="ada@example.com").one()
+        ada.course_id, ada.year, ada.division = course_id, 1, "A"
         db.add(
             ClassMember(
                 student_id=ada.id,
@@ -112,9 +115,10 @@ def test_student_and_professor_share_one_database(
         "create_lab",
         {
             "title": "Server-made lab",
-            "course": "CS",
+            "course_id": course_id,
+            "year": 1,
             "division": "A",
-            "batch": "1",
+            "course": "CS",
             "topic": "Loops",
             "description": "d",
             "difficulty": "Easy",
@@ -224,7 +228,7 @@ def test_code_runs_locally_and_the_server_records_it(
 def test_export_asks_the_client_where_to_save(
     server: tuple[TestClient, ServerState], tmp_path: Any
 ) -> None:
-    http, _ = server
+    http, state = server
     from eaal_platform.db.engine import create_db_engine, create_session_factory, init_db
 
     local_engine = create_db_engine(tmp_path / "local.db")
@@ -232,6 +236,7 @@ def test_export_asks_the_client_where_to_save(
     target = tmp_path / "report.csv"
     api = _client_api(http, create_session_factory(local_engine), dialog=lambda _name: str(target))
     api.create_account("professor", "Dr. K", "k@example.com", _PASSWORD)
+    assign_any_course(state.session_factory, "k@example.com")
     api.login("professor", "k@example.com", _PASSWORD)
     task_id = api.get_professor_labs()[0]["id"]
 
