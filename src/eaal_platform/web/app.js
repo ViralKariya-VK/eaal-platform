@@ -1009,8 +1009,44 @@ function renderSidebar() {
   activeNavItems().forEach((item) => {
     document
       .querySelector(`.nav-item[data-nav="${item.key}"]`)
-      .addEventListener("click", item.action);
+      .addEventListener("click", () => openNavItem(item));
   });
+}
+
+// On a classroom server an administrator assigns a professor's courses. Until they have been
+// assigned something, everything but Profile shows a waiting notice instead.
+function openNavItem(item) {
+  if (currentRole !== "professor" || !serverMode || item.key === "profile") {
+    item.action();
+    return;
+  }
+  api()
+    .get_my_courses()
+    .then((courses) => (courses.length ? item.action() : showWaitingForAssignment(item.key)))
+    .catch(() => item.action());
+}
+
+function showWaitingForAssignment(activeKey) {
+  nextRefresh = {
+    topics: ["accounts"],
+    run: () =>
+      api()
+        .get_my_courses()
+        .then((courses) => (courses.length ? showProfessorHome() : showWaitingForAssignment(activeKey))),
+  };
+  setScreen(
+    `
+    <div class="page-heading"><div><h1>Waiting for your assignment</h1>
+      <p class="subtitle">Your account is ready, but no course or subject has been assigned to you yet.</p></div></div>
+    <div class="card waiting-card">
+      <div class="icon-tile">${icon("people")}</div>
+      <div>
+        <h3>An administrator will give you access</h3>
+        <p class="muted">Labs, classes, reports and resources are switched on as soon as an administrator assigns you the courses, subjects, divisions and batches you teach. This page updates by itself; there is nothing you need to do. You can still open Profile to check your details.</p>
+      </div>
+    </div>`,
+    activeKey
+  );
 }
 
 function setActiveNav(key) {
@@ -2069,14 +2105,22 @@ function classFilterBar(students) {
   const options = (values, current, all, label = (v) => v) =>
     `<option value="">${all}</option>` +
     values.map((v) => `<option value="${escapeHtml(v)}"${v === current ? " selected" : ""}>${escapeHtml(label(v))}</option>`).join("");
-  return `<div class="class-filters">
-    <input type="search" id="classSearch" placeholder="Search name, SAP ID or roll no." value="${escapeHtml(classFilter.q)}" />
-    <select id="fCourse" aria-label="Course">${options(distinct((s) => s.course_label || s.course), classFilter.course, "All courses")}</select>
-    <select id="fDivision" aria-label="Division">${options(distinct((s) => s.division), classFilter.division, "All divisions", (v) => "Division " + v)}</select>
-    <select id="fBatch" aria-label="Batch">${options(distinct((s) => (s.batch ? String(s.batch) : "")), classFilter.batch, "Both batches", (v) => "Batch " + v)}</select>
+  return `<div class="card filter-bar">
+    <label class="filter-search">Search
+      <input type="search" id="classSearch" placeholder="Name, SAP ID or roll no." value="${escapeHtml(classFilter.q)}" />
+    </label>
+    <label>Course
+      <select id="fCourse">${options(distinct((s) => s.course_label || s.course), classFilter.course, "All Courses")}</select>
+    </label>
+    <label>Division
+      <select id="fDivision">${options(distinct((s) => s.division), classFilter.division, "All Divisions", (v) => "Division " + v)}</select>
+    </label>
+    <label>Batch
+      <select id="fBatch">${options(distinct((s) => (s.batch ? String(s.batch) : "")), classFilter.batch, "Both Batches", (v) => "Batch " + v)}</select>
+    </label>
     <button class="ghost" id="clearClassFilters">Clear</button>
-    <span class="muted" id="classCount"></span>
-  </div>`;
+  </div>
+  <p class="muted" id="classCount" style="margin:-6px 0 10px;"></p>`;
 }
 
 function placeLine(item) {
@@ -2125,13 +2169,13 @@ function showStudents() {
     <div class="card teaching-card">
       <div>
         <h3>Courses you teach</h3>
-        <p class="muted">The students of these courses join your class automatically, now and whenever someone new picks the course.</p>
+        <p class="muted">The students of these courses join your class automatically${serverMode ? ". An administrator assigns your courses, subjects, divisions and batches." : ", now and whenever someone new picks the course."}</p>
         <div class="chips">${
           catalog.filter((c) => c.teaching).map((c) => `<span class="chip">${escapeHtml(c.label)}</span>`).join("") ||
-          `<span class="muted">None yet. Choose the courses you teach to get your students.</span>`
+          `<span class="muted">${serverMode ? "Nothing assigned yet." : "None yet. Choose the courses you teach to get your students."}</span>`
         }</div>
       </div>
-      <button class="primary" id="chooseCourses">Choose courses</button>
+      ${serverMode ? "" : `<button class="primary" id="chooseCourses">Choose courses</button>`}
     </div>
     ${
       students.length
@@ -2244,7 +2288,8 @@ function showStudents() {
           });
       });
     }
-    document.getElementById("chooseCourses").addEventListener("click", () => showTeachingCourses(false));
+    const chooseCourses = document.getElementById("chooseCourses");
+    if (chooseCourses) chooseCourses.addEventListener("click", () => showTeachingCourses(false));
     const bindRows = () => {
       document.querySelectorAll("#classBody .view-progress").forEach((btn) => {
         btn.addEventListener("click", () => showStudentProgress(Number(btn.dataset.studentId)));
@@ -2542,7 +2587,7 @@ function renderCreateSession(existing, courses) {
           <textarea id="sessionDescription" rows="3" placeholder="The question only, e.g. &quot;Merge two arrays into one, keeping the order.&quot; Students see it when the assessment starts."></textarea>
         </label>
         <label class="span-2">Instructions
-          <textarea id="sessionInstructions" rows="5" placeholder="What to follow: input format, output format, an example (Input: ... Output: ...), constraints. One point per line."></textarea>
+          <textarea id="sessionInstructions" rows="5" placeholder="Markdown works: ### Input, ### Output, ### Example, ### Constraints, with - bullets. Or let the AI draft it."></textarea>
         </label>
         <div class="span-2 ai-draft-row"><button class="ghost" id="draftDescription" type="button">${icon("sparkle")}Draft with AI</button><span class="muted" id="draftStatus">Write a few words first, or leave both empty to use just the title and topic. The AI fills the question and the instructions separately.</span></div>
       </div>
@@ -3451,8 +3496,8 @@ function showWorkspace(info) {
       ${
         info.task_description
           ? `<div class="card problem-statement" id="problemStatement" tabindex="0" aria-label="Problem">
-              <div class="problem-part"><div class="problem-label">Problem</div><div>${escapeHtml(info.task_description)}</div></div>
-              ${info.task_instructions ? `<div class="problem-part"><div class="problem-label">Instructions</div><div class="problem-instructions">${escapeHtml(info.task_instructions)}</div></div>` : ""}
+              <div class="problem-part"><div class="problem-label">Problem</div><div class="md">${renderMarkdown(info.task_description)}</div></div>
+              ${info.task_instructions ? `<div class="problem-part"><div class="problem-label">Instructions</div><div class="md">${renderMarkdown(info.task_instructions)}</div></div>` : ""}
             </div>`
           : ""
       }
@@ -4388,7 +4433,7 @@ function enterApp(role, name, mustChangePassword = false, needsDetails = false) 
     showProfile();
   } else if (role === "professor") {
     if (needsDetails) showTeachingCourses(true);
-    else showMyLabs();
+    else openNavItem({ key: "my-labs", action: showMyLabs });
     maybePromptAiSetup();
   } else {
     showLabs();

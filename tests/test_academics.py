@@ -573,7 +573,7 @@ def test_teaching_a_course_brings_in_its_students_now_and_later(
     assert _owner(db_session_factory, early[0]) == sorted([prof, other])
 
 
-def test_a_professor_picks_their_own_courses(db_session_factory: Factory) -> None:
+def test_an_administrator_assigns_a_professors_courses(db_session_factory: Factory) -> None:
     seed_demo_content(db_session_factory)
     course = _course(db_session_factory)
     create_professor_account(db_session_factory, display_name="P", email="p@x.com", password=_PW)
@@ -586,19 +586,20 @@ def test_a_professor_picks_their_own_courses(db_session_factory: Factory) -> Non
     )
     teacher = _server_api(db_session_factory)
     login = teacher.login("professor", "p@x.com", _PW)
-    assert login["needs_details"] is True  # asked to choose on the first login
+    assert login["needs_details"] is False  # an administrator assigns courses on a server
+    assert teacher.get_my_courses() == []
 
     catalog = teacher.get_course_catalog()
     assert [(c["id"], c["teaching"], c["students"]) for c in catalog] == [(course, False, 1)]
     assert catalog[0]["label"].startswith("Engineering (CRS-")
 
-    done = teacher.set_my_courses([course])
-    assert done == {"ok": True, "added_students": 1}
+    refused = teacher.set_my_courses([course])
+    assert refused["ok"] is False and "administrator" in refused["error"]
+    academics.set_professor_courses(db_session_factory, teacher._current_professor_id, [course])
     assert _owner(db_session_factory, student) == [teacher._current_professor_id]
     assert teacher.get_course_catalog()[0]["teaching"] is True
     teacher.logout()
     assert teacher.login("professor", "p@x.com", _PW)["needs_details"] is False
-    assert teacher.set_my_courses([999])["ok"] is False
 
 
 def test_old_databases_get_course_codes(db_session_factory: Factory, db_engine: Engine) -> None:

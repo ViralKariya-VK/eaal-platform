@@ -45,6 +45,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eaal_platform.ai import cloud_providers
 from eaal_platform.ai.ollama_provider import OllamaProvider
+from eaal_platform.ai.problem_prompt import PROBLEM_AUTHORING_PROMPT, split_reply
 from eaal_platform.ai.provider import (
     AIProvider,
     GenerationContext,
@@ -432,12 +433,8 @@ class CavyApi:
             return bool(account and account.disabled)
 
     def _professor_needs_courses(self) -> bool:
-        """True for a professor on a server who hasn't yet said which courses they teach."""
-        if not self._restrict_signup:
-            return False
-        professor_id = self._require_professor_id()
-        has_any = bool(academics.professor_course_ids(self._session_factory, professor_id))
-        return not has_any and bool(academics.list_courses(self._session_factory))
+        """Never: on a server an administrator assigns a professor's courses, they don't pick."""
+        return False
 
     def _student_needs_details(self) -> bool:
         """True for a student who hasn't said which course they are in (while courses exist)."""
@@ -589,6 +586,8 @@ class CavyApi:
     def set_my_courses(self, course_ids: list[int]) -> dict[str, Any]:
         """The professor says which courses they teach; those courses' students join their class."""
         professor_id = self._require_professor_id()
+        if self._restrict_signup:
+            return {"ok": False, "error": "Your administrator assigns the courses you teach."}
         try:
             result = academics.set_professor_courses(
                 self._session_factory, professor_id, [int(i) for i in course_ids]
@@ -2233,33 +2232,17 @@ class CavyApi:
     def draft_problem_description(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Have the AI draft (or tidy up) a problem from a title, topic and notes.
 
-        With ``split`` set, the answer is the question (``text``) and the instructions to follow
-        (``instructions``: format, one example, constraints) as two separate parts.
+        Always uses the one saved prompt (``PROBLEM_AUTHORING_PROMPT``). The answer is the question
+        (``text``) and, with ``split`` set, the Markdown instructions (``instructions``) apart;
+        without ``split`` both come back joined in ``text``.
         """
         self._require_professor_id()
         title = str(spec.get("title") or "").strip()
         notes = str(spec.get("notes") or "").strip()
         extra = str(spec.get("instructions") or "").strip()
-        split = bool(spec.get("split"))
         if not title and not notes and not extra:
             return {"ok": False, "error": "Enter a title (or a few notes) first."}
-        lines = [
-            "Write a clear programming problem for a university lab, in plain text "
-            "(no markdown, no headings, no code fences).",
-            "Do not include the solution. Use Python as the language.",
-        ]
-        if split:
-            lines += [
-                "Reply in exactly two parts. First the line PROBLEM: then the question itself "
-                "(what to build, in at most 80 words). Then the line INSTRUCTIONS: followed by "
-                "short lines: the input format, the output format, one example "
-                "(Input: ... Output: ...) and the constraints.",
-            ]
-        else:
-            lines.append(
-                "State what to build, what the input and output are, one short example and any "
-                "constraints, in at most 150 words."
-            )
+        lines = [PROBLEM_AUTHORING_PROMPT]
         for label, key in (("Title", "title"), ("Topic", "topic"), ("Difficulty", "difficulty")):
             if spec.get(key):
                 lines.append(f"{label}: {spec[key]}")
@@ -2275,15 +2258,10 @@ class CavyApi:
                 "error": problem
                 or "The AI assistant didn't answer. Ask your administrator to set it up.",
             }
-        text = result.text.strip()
-        if not split:
-            return {"ok": True, "text": text}
-        match = re.search(r"INSTRUCTIONS:\s*", text)
-        question, instructions = (
-            (text[: match.start()], text[match.end() :]) if match else (text, "")
-        )
-        question = re.sub(r"^\s*PROBLEM:\s*", "", question).strip()
-        return {"ok": True, "text": question, "instructions": instructions.strip()}
+        question, instructions = split_reply(result.text.strip())
+        if spec.get("split"):
+            return {"ok": True, "text": question, "instructions": instructions}
+        return {"ok": True, "text": f"{question}\n\n{instructions}".strip()}
 
     # -- persistence helpers ----------------------------------------------
 

@@ -174,8 +174,16 @@ def test_the_ai_splits_the_question_from_the_instructions(db_session_factory: Fa
         "text": "Merge two arrays.",
         "instructions": "Input: n, then n numbers\nOutput: one line",
     }
-    assert "INSTRUCTIONS:" in writer.prompts[0]
+    assert "INSTRUCTIONS:" in writer.prompts[0] and "Markdown" in writer.prompts[0]
     logger.stop()
+
+
+def test_the_reply_is_split_even_when_the_model_formats_the_markers_differently() -> None:
+    from eaal_platform.ai.problem_prompt import split_reply
+
+    assert split_reply("PROBLEM:\nA\nINSTRUCTIONS:\n### Input\nB") == ("A", "### Input\nB")
+    assert split_reply("**Problem:** A\n\n## Instructions\n- B") == ("A", "- B")
+    assert split_reply("Just a question") == ("Just a question", "")
 
 
 def test_students_cannot_use_the_professor_tools(db_session_factory: Factory) -> None:
