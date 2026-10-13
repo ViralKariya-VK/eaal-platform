@@ -271,7 +271,8 @@ function openUpdatePage() {
 }
 
 function startUpdateChecks() {
-  refreshUpdateInfo();
+  // Ask GitHub afresh at every launch, so a release made since the last check shows at once.
+  refreshUpdateInfo(true);
   setInterval(() => refreshUpdateInfo(), 6 * 60 * 60 * 1000);
 }
 
