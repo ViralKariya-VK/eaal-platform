@@ -55,18 +55,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Small, deliberately limited Markdown renderer for AI chat replies — just
-// enough for what local models actually produce (fenced code, inline code,
-// bold/italic, headings, bullet lists). Operates on already-escaped text,
-// so the only "tags" it ever introduces are the ones it inserts itself;
-// nothing in the source text can inject markup.
-function renderInlineMarkdown(escapedText) {
-  return escapedText
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
-}
-
 // Run a button's action once: the button stays disabled until the request ends, so a double
 // click can't send it twice (two labs, two follow-ups). Re-enabled afterwards, including on failure.
 function runOnce(button, action) {
@@ -91,57 +79,154 @@ function readMinutes(raw) {
   return { minutes: number };
 }
 
-function renderMarkdown(rawText) {
-  const lines = escapeHtml(rawText).split("\n");
-  let html = "";
-  let inCode = false;
-  let codeLines = [];
-  let listItems = [];
+// A small Markdown renderer for AI replies and lab problems: headings, bold/italic/strikethrough,
+// inline code, links, blockquotes, rules, nested bullet and numbered lists, tables and fenced code
+// blocks with a Copy button. The text is escaped first, so the only tags that ever appear are the
+// ones this function writes itself; nothing in the source can inject markup.
+function renderInlineMarkdown(escapedText) {
+  const codes = [];
+  let out = escapedText.replace(/`([^`\n]+)`/g, (_, code) => {
+    codes.push(`<code>${code}</code>`);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  out = out
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="#" class="md-link" data-link="$2">$1</a>')
+    .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, (_, a, b) => `<strong>${a || b}</strong>`)
+    .replace(/(?<![*\w])\*([^*\n]+)\*(?![*\w])|(?<![_\w])_([^_\n]+)_(?![_\w])/g, (_, a, b) => `<em>${a || b}</em>`)
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
+}
 
-  const flushList = () => {
-    if (listItems.length) {
-      html += `<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`;
-      listItems = [];
+function renderMarkdown(rawText) {
+  const lines = escapeHtml(rawText).replace(/\r/g, "").split("\n");
+  const inline = renderInlineMarkdown;
+  let html = "";
+  let i = 0;
+
+  const listItem = (line) => line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+  const tableRow = (line) =>
+    line
+      .trim()
+      .replace(/^\||\|$/g, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  // A run of list lines, nested by indentation (two or more spaces per level).
+  const renderList = () => {
+    const stack = []; // { indent, tag }
+    let out = "";
+    while (i < lines.length) {
+      const m = listItem(lines[i]);
+      if (!m) break;
+      const indent = m[1].replace(/\t/g, "  ").length;
+      const tag = /\d/.test(m[2]) ? "ol" : "ul";
+      while (stack.length && indent < stack[stack.length - 1].indent) {
+        out += `</li></${stack.pop().tag}>`;
+      }
+      if (!stack.length || indent > stack[stack.length - 1].indent) {
+        const start = tag === "ol" && stack.length === 0 ? ` start="${parseInt(m[2], 10)}"` : "";
+        out += `<${tag}${start}>`;
+        stack.push({ indent, tag });
+      } else {
+        out += "</li>";
+      }
+      out += `<li>${inline(m[3])}`;
+      i += 1;
     }
+    while (stack.length) out += `</li></${stack.pop().tag}>`;
+    return out;
   };
 
-  for (const line of lines) {
-    if (/^```/.test(line)) {
-      if (inCode) {
-        html += `<pre class="md-code">${codeLines.join("\n")}</pre>`;
-        codeLines = [];
-      } else {
-        flushList();
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^\s*```\s*([\w+-]*)/);
+    if (fence) {
+      const code = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) {
+        code.push(lines[i]);
+        i += 1;
       }
-      inCode = !inCode;
+      i += 1; // the closing fence (or the end of an unfinished reply)
+      html += `<div class="md-codeblock"><div class="md-code-head"><span>${fence[1] || "code"}</span><button type="button" class="md-copy">Copy</button></div><pre class="md-code"><code>${code.join("\n")}</code></pre></div>`;
       continue;
     }
-    if (inCode) {
-      codeLines.push(line);
+    if (line.trim() === "") {
+      i += 1;
       continue;
     }
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    const heading = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
     if (heading) {
-      flushList();
-      html += `<p class="md-heading">${renderInlineMarkdown(heading[1])}</p>`;
+      const level = Math.min(heading[1].length + 1, 5);
+      html += `<h${level} class="md-heading md-h">${inline(heading[2])}</h${level}>`;
+      i += 1;
       continue;
     }
-    const bullet = line.match(/^[-*]\s+(.*)$/);
-    if (bullet) {
-      listItems.push(bullet[1]);
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      html += "<hr />";
+      i += 1;
       continue;
     }
-    flushList();
-    if (line.trim() !== "") {
-      html += `<p>${renderInlineMarkdown(line)}</p>`;
+    if (/^\s*&gt;/.test(line)) {
+      const quote = [];
+      while (i < lines.length && /^\s*&gt;/.test(lines[i])) {
+        quote.push(lines[i].replace(/^\s*&gt;\s?/, ""));
+        i += 1;
+      }
+      html += `<blockquote>${quote.map(inline).join("<br />")}</blockquote>`;
+      continue;
     }
-  }
-  flushList();
-  if (inCode && codeLines.length) {
-    html += `<pre class="md-code">${codeLines.join("\n")}</pre>`;
+    if (listItem(line)) {
+      html += renderList();
+      continue;
+    }
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
+      const head = tableRow(line);
+      i += 2;
+      let body = "";
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+        body += `<tr>${tableRow(lines[i]).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`;
+        i += 1;
+      }
+      html += `<div class="md-table-wrap"><table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+      continue;
+    }
+    const para = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !/^\s*(```|#{1,6}\s|&gt;)/.test(lines[i]) &&
+      !listItem(lines[i])
+    ) {
+      para.push(lines[i]);
+      i += 1;
+    }
+    html += `<p>${para.map(inline).join("<br />")}</p>`;
   }
   return html;
 }
+
+// Links in rendered Markdown open in the browser, never inside the app window; Copy buttons copy
+// their code block.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest && event.target.closest("a.md-link");
+  if (link) {
+    event.preventDefault();
+    api().open_link(link.dataset.link).catch(() => {});
+    return;
+  }
+  const copy = event.target.closest && event.target.closest("button.md-copy");
+  if (copy) {
+    const code = copy.closest(".md-codeblock").querySelector("code").textContent;
+    const done = () => {
+      copy.textContent = "Copied";
+      setTimeout(() => (copy.textContent = "Copy"), 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done).catch(() => {});
+    else done();
+  }
+});
 
 // Screens that can refresh themselves when the server reports news set this
 // just before calling setScreen(); every other screen (above all the code
@@ -3929,7 +4014,14 @@ function renderChatPanel(container, info, getFiles) {
     const message = input.value.trim();
     if (!message) return;
     if (emptyState) emptyState.remove();
-    transcript.innerHTML += `<div class="msg you"><b>You:</b> ${escapeHtml(message)}</div>`;
+    transcript.insertAdjacentHTML(
+      "beforeend",
+      `<div class="msg you"><div class="bubble">${escapeHtml(message).replace(/\n/g, "<br />")}</div></div>`
+    );
+    const pending = document.createElement("div");
+    pending.className = "msg assistant pending";
+    pending.innerHTML = `<div class="msg-who"><span class="avatar">${icon("sparkle")}</span>Assistant</div><div class="typing"><span></span><span></span><span></span></div>`;
+    transcript.appendChild(pending);
     transcript.scrollTop = transcript.scrollHeight;
     input.value = "";
     input.disabled = true;
@@ -3941,15 +4033,15 @@ function renderChatPanel(container, info, getFiles) {
       .then((result) => {
         input.disabled = false;
         sendButton.disabled = false;
-        if (result.available) {
-          transcript.innerHTML += `<div class="msg assistant"><b>Assistant:</b>${renderMarkdown(result.text)}</div>`;
-          status.textContent = "Assistant ready";
-        } else {
-          const why = result.text ? ` (${escapeHtml(String(result.text))})` : "";
-          transcript.innerHTML += `<div class="msg assistant"><i>The assistant didn't respond — it may not be running.${why}</i></div>`;
-          status.textContent = "Assistant not available";
-        }
-        transcript.scrollTop = transcript.scrollHeight;
+        input.focus();
+        const body = result.available
+          ? `<div class="msg-body">${renderMarkdown(result.text)}</div>`
+          : `<div class="msg-body muted"><p><em>The assistant didn't respond \u2014 it may not be running.${result.text ? ` (${escapeHtml(String(result.text))})` : ""}</em></p></div>`;
+        pending.classList.remove("pending");
+        pending.innerHTML = `<div class="msg-who"><span class="avatar">${icon("sparkle")}</span>Assistant</div>${body}`;
+        status.textContent = result.available ? "Assistant ready" : "Assistant not available";
+        // Show the start of the answer, not the end of it.
+        transcript.scrollTop = Math.max(0, pending.offsetTop - transcript.offsetTop - 8);
       });
   };
 
