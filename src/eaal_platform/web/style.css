@@ -2643,3 +2643,11 @@ details.fold > summary h2 {
   align-items: flex-start;
   max-width: 720px;
 }
+
+.version-line {
+  margin-top: 8px;
+  font-family: var(--font-sans, inherit);
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.6;
+}

@@ -1003,8 +1003,15 @@ function renderSidebar() {
 
   document.getElementById("sidebar").innerHTML = `
     <ul class="nav-list">${items}</ul>
-    <div class="sidebar-footer">${sidebarFooter()}</div>
+    <div class="sidebar-footer">${sidebarFooter()}<div class="version-line" id="versionLine"></div></div>
   `;
+  api()
+    .get_version_info()
+    .then((info) => {
+      const line = document.getElementById("versionLine");
+      if (line) line.textContent = `CAVY ${info.app}`;
+    })
+    .catch(() => {});
 
   activeNavItems().forEach((item) => {
     document
