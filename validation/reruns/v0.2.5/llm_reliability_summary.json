@@ -1,0 +1,49 @@
+{
+  "n_repeats_per_example": 5,
+  "model": "qwen3:8b",
+  "help_seeking_calibration": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.08966936266670045,
+      "max_stdev_across_examples": 0.3709447398198282,
+      "mean_range_across_examples": 0.225,
+      "max_range_across_examples": 1.0,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.9373849950855591,
+      "p_value": 0.0005852665892512487
+    },
+    "total_parse_failures": 10,
+    "total_calls": 40
+  },
+  "student_grounding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.015,
+      "max_stdev_across_examples": 0.12,
+      "mean_range_across_examples": 0.0375,
+      "max_range_across_examples": 0.3,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.8685990362153791,
+      "p_value": 0.005127703764022129
+    },
+    "total_parse_failures": 10,
+    "total_calls": 40
+  },
+  "conceptual_understanding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.052218203116904414,
+      "max_stdev_across_examples": 0.25980762113533157,
+      "mean_range_across_examples": 0.11521739130434783,
+      "max_range_across_examples": 0.6,
+      "n_examples_with_repeats": 23
+    },
+    "face_validity": {
+      "spearman_r": 0.9516474508327507,
+      "p_value": 3.0963934758890583e-12
+    },
+    "total_parse_failures": 19,
+    "total_calls": 120
+  }
+}

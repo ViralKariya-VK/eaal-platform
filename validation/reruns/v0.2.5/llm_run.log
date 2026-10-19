@@ -1,0 +1,214 @@
+Using live provider: ollama / qwen3:8b
+[1/8] explicit_solution_request_no_attempt repeat 1/5
+[1/8] explicit_solution_request_no_attempt repeat 2/5
+[1/8] explicit_solution_request_no_attempt repeat 3/5
+[1/8] explicit_solution_request_no_attempt repeat 4/5
+[1/8] explicit_solution_request_no_attempt repeat 5/5
+[2/8] bare_vague_request repeat 1/5
+[2/8] bare_vague_request repeat 2/5
+[2/8] bare_vague_request repeat 3/5
+[2/8] bare_vague_request repeat 4/5
+[2/8] bare_vague_request repeat 5/5
+[3/8] preliminary_concept_question repeat 1/5
+[3/8] preliminary_concept_question repeat 2/5
+[3/8] preliminary_concept_question repeat 3/5
+[3/8] preliminary_concept_question repeat 4/5
+[3/8] preliminary_concept_question repeat 5/5
+[4/8] reasoning_check_no_code repeat 1/5
+[4/8] reasoning_check_no_code repeat 2/5
+[4/8] reasoning_check_no_code repeat 3/5
+[4/8] reasoning_check_no_code repeat 4/5
+[4/8] reasoning_check_no_code repeat 5/5
+[5/8] specific_bug_with_code repeat 1/5
+[5/8] specific_bug_with_code repeat 2/5
+[5/8] specific_bug_with_code repeat 3/5
+[5/8] specific_bug_with_code repeat 4/5
+[5/8] specific_bug_with_code repeat 5/5
+[6/8] error_traceback_with_stderr repeat 1/5
+[6/8] error_traceback_with_stderr repeat 2/5
+[6/8] error_traceback_with_stderr repeat 3/5
+[6/8] error_traceback_with_stderr repeat 4/5
+[6/8] error_traceback_with_stderr repeat 5/5
+[7/8] premature_full_solution_with_no_code_shown repeat 1/5
+[7/8] premature_full_solution_with_no_code_shown repeat 2/5
+[7/8] premature_full_solution_with_no_code_shown repeat 3/5
+[7/8] premature_full_solution_with_no_code_shown repeat 4/5
+[7/8] premature_full_solution_with_no_code_shown repeat 5/5
+[8/8] bare_greeting repeat 1/5
+[8/8] bare_greeting repeat 2/5
+[8/8] bare_greeting repeat 3/5
+[8/8] bare_greeting repeat 4/5
+[8/8] bare_greeting repeat 5/5
+[1/24] rigorous_explanation repeat 1/5
+[1/24] rigorous_explanation repeat 2/5
+[1/24] rigorous_explanation repeat 3/5
+[1/24] rigorous_explanation repeat 4/5
+[1/24] rigorous_explanation repeat 5/5
+[2/24] core_idea_less_rigorous repeat 1/5
+[2/24] core_idea_less_rigorous repeat 2/5
+[2/24] core_idea_less_rigorous repeat 3/5
+[2/24] core_idea_less_rigorous repeat 4/5
+[2/24] core_idea_less_rigorous repeat 5/5
+[3/24] surface_line_by_line_restatement repeat 1/5
+[3/24] surface_line_by_line_restatement repeat 2/5
+[3/24] surface_line_by_line_restatement repeat 3/5
+[3/24] surface_line_by_line_restatement repeat 4/5
+[3/24] surface_line_by_line_restatement repeat 5/5
+[4/24] vague_gesture_at_mechanism repeat 1/5
+[4/24] vague_gesture_at_mechanism repeat 2/5
+[4/24] vague_gesture_at_mechanism repeat 3/5
+[4/24] vague_gesture_at_mechanism repeat 4/5
+[4/24] vague_gesture_at_mechanism repeat 5/5
+[5/24] no_understanding_admitted repeat 1/5
+[5/24] no_understanding_admitted repeat 2/5
+[5/24] no_understanding_admitted repeat 3/5
+[5/24] no_understanding_admitted repeat 4/5
+[5/24] no_understanding_admitted repeat 5/5
+[6/24] confidently_wrong repeat 1/5
+[6/24] confidently_wrong repeat 2/5
+[6/24] confidently_wrong repeat 3/5
+[6/24] confidently_wrong repeat 4/5
+[6/24] confidently_wrong repeat 5/5
+[7/24] palindrome_rigorous repeat 1/5
+[7/24] palindrome_rigorous repeat 2/5
+[7/24] palindrome_rigorous repeat 3/5
+[7/24] palindrome_rigorous repeat 4/5
+[7/24] palindrome_rigorous repeat 5/5
+[8/24] binary_search_rigorous repeat 1/5
+[8/24] binary_search_rigorous repeat 2/5
+[8/24] binary_search_rigorous repeat 3/5
+[8/24] binary_search_rigorous repeat 4/5
+[8/24] binary_search_rigorous repeat 5/5
+[9/24] binary_search_terse_but_correct repeat 1/5
+[9/24] binary_search_terse_but_correct repeat 2/5
+[9/24] binary_search_terse_but_correct repeat 3/5
+[9/24] binary_search_terse_but_correct repeat 4/5
+[9/24] binary_search_terse_but_correct repeat 5/5
+[10/24] palindrome_core_idea repeat 1/5
+[10/24] palindrome_core_idea repeat 2/5
+[10/24] palindrome_core_idea repeat 3/5
+[10/24] palindrome_core_idea repeat 4/5
+[10/24] palindrome_core_idea repeat 5/5
+[11/24] palindrome_surface_restatement repeat 1/5
+[11/24] palindrome_surface_restatement repeat 2/5
+[11/24] palindrome_surface_restatement repeat 3/5
+[11/24] palindrome_surface_restatement repeat 4/5
+[11/24] palindrome_surface_restatement repeat 5/5
+[12/24] binary_search_surface_long repeat 1/5
+[12/24] binary_search_surface_long repeat 2/5
+[12/24] binary_search_surface_long repeat 3/5
+[12/24] binary_search_surface_long repeat 4/5
+[12/24] binary_search_surface_long repeat 5/5
+[13/24] palindrome_vague repeat 1/5
+[13/24] palindrome_vague repeat 2/5
+[13/24] palindrome_vague repeat 3/5
+[13/24] palindrome_vague repeat 4/5
+[13/24] palindrome_vague repeat 5/5
+[14/24] binary_search_no_understanding repeat 1/5
+[14/24] binary_search_no_understanding repeat 2/5
+[14/24] binary_search_no_understanding repeat 3/5
+[14/24] binary_search_no_understanding repeat 4/5
+[14/24] binary_search_no_understanding repeat 5/5
+[15/24] palindrome_confidently_wrong repeat 1/5
+[15/24] palindrome_confidently_wrong repeat 2/5
+[15/24] palindrome_confidently_wrong repeat 3/5
+[15/24] palindrome_confidently_wrong repeat 4/5
+[15/24] palindrome_confidently_wrong repeat 5/5
+[16/24] factorial_rigorous repeat 1/5
+[16/24] factorial_rigorous repeat 2/5
+[16/24] factorial_rigorous repeat 3/5
+[16/24] factorial_rigorous repeat 4/5
+[16/24] factorial_rigorous repeat 5/5
+[17/24] prime_rigorous repeat 1/5
+[17/24] prime_rigorous repeat 2/5
+[17/24] prime_rigorous repeat 3/5
+[17/24] prime_rigorous repeat 4/5
+[17/24] prime_rigorous repeat 5/5
+[18/24] merge_terse_correct repeat 1/5
+[18/24] merge_terse_correct repeat 2/5
+[18/24] merge_terse_correct repeat 3/5
+[18/24] merge_terse_correct repeat 4/5
+[18/24] merge_terse_correct repeat 5/5
+[19/24] prime_core_idea repeat 1/5
+[19/24] prime_core_idea repeat 2/5
+[19/24] prime_core_idea repeat 3/5
+[19/24] prime_core_idea repeat 4/5
+[19/24] prime_core_idea repeat 5/5
+[20/24] factorial_surface repeat 1/5
+[20/24] factorial_surface repeat 2/5
+[20/24] factorial_surface repeat 3/5
+[20/24] factorial_surface repeat 4/5
+[20/24] factorial_surface repeat 5/5
+[21/24] prime_surface_with_sqrt repeat 1/5
+[21/24] prime_surface_with_sqrt repeat 2/5
+[21/24] prime_surface_with_sqrt repeat 3/5
+[21/24] prime_surface_with_sqrt repeat 4/5
+[21/24] prime_surface_with_sqrt repeat 5/5
+[22/24] merge_vague repeat 1/5
+[22/24] merge_vague repeat 2/5
+[22/24] merge_vague repeat 3/5
+[22/24] merge_vague repeat 4/5
+[22/24] merge_vague repeat 5/5
+[23/24] factorial_no_understanding repeat 1/5
+[23/24] factorial_no_understanding repeat 2/5
+[23/24] factorial_no_understanding repeat 3/5
+[23/24] factorial_no_understanding repeat 4/5
+[23/24] factorial_no_understanding repeat 5/5
+[24/24] merge_confidently_wrong repeat 1/5
+[24/24] merge_confidently_wrong repeat 2/5
+[24/24] merge_confidently_wrong repeat 3/5
+[24/24] merge_confidently_wrong repeat 4/5
+[24/24] merge_confidently_wrong repeat 5/5
+{
+  "n_repeats_per_example": 5,
+  "model": "qwen3:8b",
+  "help_seeking_calibration": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.08966936266670045,
+      "max_stdev_across_examples": 0.3709447398198282,
+      "mean_range_across_examples": 0.225,
+      "max_range_across_examples": 1.0,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.9373849950855591,
+      "p_value": 0.0005852665892512487
+    },
+    "total_parse_failures": 10,
+    "total_calls": 40
+  },
+  "student_grounding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.015,
+      "max_stdev_across_examples": 0.12,
+      "mean_range_across_examples": 0.0375,
+      "max_range_across_examples": 0.3,
+      "n_examples_with_repeats": 8
+    },
+    "face_validity": {
+      "spearman_r": 0.8685990362153791,
+      "p_value": 0.005127703764022129
+    },
+    "total_parse_failures": 10,
+    "total_calls": 40
+  },
+  "conceptual_understanding": {
+    "reliability": {
+      "mean_stdev_across_examples": 0.052218203116904414,
+      "max_stdev_across_examples": 0.25980762113533157,
+      "mean_range_across_examples": 0.11521739130434783,
+      "max_range_across_examples": 0.6,
+      "n_examples_with_repeats": 23
+    },
+    "face_validity": {
+      "spearman_r": 0.9516474508327507,
+      "p_value": 3.0963934758890583e-12
+    },
+    "total_parse_failures": 19,
+    "total_calls": 120
+  }
+}
+
+Wrote llm_help_seeking_raw.json, llm_concept_understanding_raw.json,
+llm_reliability_summary.json
+LLM_DONE

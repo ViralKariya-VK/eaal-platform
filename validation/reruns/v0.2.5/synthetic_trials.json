@@ -1,0 +1,1180 @@
+[
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.9651162790697675,
+    "session_id": 1,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=0/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.9651162790697675,
+    "session_id": 1,
+    "computed_value": 0.03790087463556846,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=0/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.901840490797546,
+    "session_id": 2,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=1/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.901840490797546,
+    "session_id": 2,
+    "computed_value": 0.10153846153846158,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=1/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.901840490797546,
+    "session_id": 3,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=2/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.901840490797546,
+    "session_id": 3,
+    "computed_value": 0.10153846153846158,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=2/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.7456445993031359,
+    "session_id": 4,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=3/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.7456445993031359,
+    "session_id": 4,
+    "computed_value": 0.25874125874125875,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=3/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.7456445993031359,
+    "session_id": 5,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=4/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.7456445993031359,
+    "session_id": 5,
+    "computed_value": 0.25874125874125875,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=4/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.5968992248062015,
+    "session_id": 6,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=5/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.5968992248062015,
+    "session_id": 6,
+    "computed_value": 0.4085603112840467,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=5/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.3964757709251101,
+    "session_id": 7,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=6/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.3964757709251101,
+    "session_id": 7,
+    "computed_value": 0.6106194690265487,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=6/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.3964757709251101,
+    "session_id": 8,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=7/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.3964757709251101,
+    "session_id": 8,
+    "computed_value": 0.6106194690265487,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=7/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.29767441860465116,
+    "session_id": 9,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=8/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.29767441860465116,
+    "session_id": 9,
+    "computed_value": 0.7102803738317758,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=8/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.29767441860465116,
+    "session_id": 10,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=9/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.29767441860465116,
+    "session_id": 10,
+    "computed_value": 0.7102803738317758,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=9/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "response_utilization_similarity_gradient",
+    "design": 0.09473684210526316,
+    "session_id": 11,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=10/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.3",
+    "scenario": "problem_solving_agency_similarity_gradient",
+    "design": 0.09473684210526316,
+    "session_id": 11,
+    "computed_value": 0.9153439153439153,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "fraction_corrupted=10/10",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.3",
+    "scenario": "no_followup_activity",
+    "design": 0.0,
+    "session_id": 12,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.4",
+    "scenario": "changed_and_verified",
+    "design": 1.0,
+    "session_id": 13,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.4",
+    "scenario": "changed_only",
+    "design": 0.5,
+    "session_id": 14,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.4",
+    "scenario": "verified_only_no_change",
+    "design": 0.5,
+    "session_id": 15,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.4",
+    "scenario": "neither",
+    "design": 0.0,
+    "session_id": 16,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.5",
+    "scenario": "followups_0_of_2",
+    "design": 0.0,
+    "session_id": 17,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "opportunities": 2,
+      "followups": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.5",
+    "scenario": "followups_1_of_2",
+    "design": 0.5,
+    "session_id": 18,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "opportunities": 2,
+      "followups": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.5",
+    "scenario": "followups_2_of_2",
+    "design": 1.0,
+    "session_id": 19,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "opportunities": 2,
+      "followups": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.6",
+    "scenario": "improved_vs_history",
+    "design": 1.0,
+    "session_id": 22,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "current_ratio": 1.0,
+      "historical_average": 0.0,
+      "sessions_compared": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.6",
+    "scenario": "regressed_vs_history",
+    "design": 0.0,
+    "session_id": 25,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "current_ratio": 0.0,
+      "historical_average": 1.0,
+      "sessions_compared": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.6",
+    "scenario": "no_prior_sessions",
+    "design": null,
+    "session_id": 26,
+    "computed_value": null,
+    "computed_reason": "insufficient session history for a longitudinal comparison",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.1",
+    "scenario": "mid_range_scores",
+    "design": 0.65,
+    "session_id": 27,
+    "computed_value": 0.65,
+    "computed_reason": null,
+    "computed_evidence": {
+      "rated_interactions": 1
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.2",
+    "scenario": "mid_range_scores",
+    "design": 0.4,
+    "session_id": 27,
+    "computed_value": 0.4,
+    "computed_reason": null,
+    "computed_evidence": {
+      "rated_interactions": 1
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.1",
+    "scenario": "clamped_above_1",
+    "design": 1.0,
+    "session_id": 28,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "rated_interactions": 1
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S1.2",
+    "scenario": "clamped_above_1",
+    "design": 0.0,
+    "session_id": 28,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "rated_interactions": 1
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=0_runs=1",
+    "design": 0.25,
+    "session_id": 29,
+    "computed_value": 0.25,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 0,
+      "runs_before_ai": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=0_runs=2",
+    "design": 0.5,
+    "session_id": 30,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 0,
+      "runs_before_ai": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=0_runs=3",
+    "design": 0.5,
+    "session_id": 31,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 0,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=1_runs=0",
+    "design": 0.16666666666666666,
+    "session_id": 32,
+    "computed_value": 0.16666666666666666,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=1_runs=1",
+    "design": 0.41666666666666663,
+    "session_id": 33,
+    "computed_value": 0.41666666666666663,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=1_runs=2",
+    "design": 0.6666666666666666,
+    "session_id": 34,
+    "computed_value": 0.6666666666666666,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=1_runs=3",
+    "design": 0.6666666666666666,
+    "session_id": 35,
+    "computed_value": 0.6666666666666666,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=2_runs=0",
+    "design": 0.3333333333333333,
+    "session_id": 36,
+    "computed_value": 0.3333333333333333,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 2,
+      "runs_before_ai": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=2_runs=1",
+    "design": 0.5833333333333333,
+    "session_id": 37,
+    "computed_value": 0.5833333333333333,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 2,
+      "runs_before_ai": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=2_runs=2",
+    "design": 0.8333333333333333,
+    "session_id": 38,
+    "computed_value": 0.8333333333333333,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 2,
+      "runs_before_ai": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=2_runs=3",
+    "design": 0.8333333333333333,
+    "session_id": 39,
+    "computed_value": 0.8333333333333333,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 2,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=3_runs=0",
+    "design": 0.5,
+    "session_id": 40,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 3,
+      "runs_before_ai": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=3_runs=1",
+    "design": 0.75,
+    "session_id": 41,
+    "computed_value": 0.75,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 3,
+      "runs_before_ai": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=3_runs=2",
+    "design": 1.0,
+    "session_id": 42,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 3,
+      "runs_before_ai": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=3_runs=3",
+    "design": 1.0,
+    "session_id": 43,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 3,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=4_runs=0",
+    "design": 0.5,
+    "session_id": 44,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 4,
+      "runs_before_ai": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=4_runs=1",
+    "design": 0.75,
+    "session_id": 45,
+    "computed_value": 0.75,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 4,
+      "runs_before_ai": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=4_runs=2",
+    "design": 1.0,
+    "session_id": 46,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 4,
+      "runs_before_ai": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "edits=4_runs=3",
+    "design": 1.0,
+    "session_id": 47,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 4,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "no_ai_one_edit_no_runs",
+    "design": 1.0,
+    "session_id": 48,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 0
+    },
+    "notes": "expected value is the known closed-form answer (no-AI branch)",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "no_ai_one_edit_many_runs",
+    "design": 1.0,
+    "session_id": 49,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "edits_before_ai": 1,
+      "runs_before_ai": 3
+    },
+    "notes": "expected value is the known closed-form answer (no-AI branch)",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "no_ai_runs_but_no_edits",
+    "design": null,
+    "session_id": 50,
+    "computed_value": null,
+    "computed_reason": "no coding activity recorded yet",
+    "computed_evidence": {},
+    "notes": "expected value is the known closed-form answer (no-AI branch)",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.1",
+    "scenario": "no_activity_at_all",
+    "design": null,
+    "session_id": 51,
+    "computed_value": null,
+    "computed_reason": "no coding activity recorded yet",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=1_continued=0",
+    "design": 0.0,
+    "session_id": 52,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1,
+      "continued_after": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=1_continued=1",
+    "design": 1.0,
+    "session_id": 53,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 1,
+      "continued_after": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=3_continued=0",
+    "design": 0.0,
+    "session_id": 54,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 3,
+      "continued_after": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=3_continued=1",
+    "design": 0.3333333333333333,
+    "session_id": 55,
+    "computed_value": 0.3333333333333333,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 3,
+      "continued_after": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=3_continued=2",
+    "design": 0.6666666666666666,
+    "session_id": 56,
+    "computed_value": 0.6666666666666666,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 3,
+      "continued_after": 2
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.2",
+    "scenario": "n=3_continued=3",
+    "design": 1.0,
+    "session_id": 57,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "interactions": 3,
+      "continued_after": 3
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "error_then_nothing",
+    "design": 0.0,
+    "session_id": 58,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "errors": 1,
+      "recovered": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "error_then_identical_rerun",
+    "design": 0.0,
+    "session_id": 59,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "errors": 2,
+      "recovered": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "error_then_edit_never_verified",
+    "design": 0.0,
+    "session_id": 60,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "errors": 1,
+      "recovered": 0
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "error_then_fix_and_verify",
+    "design": 1.0,
+    "session_id": 61,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "errors": 1,
+      "recovered": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "two_errors_one_recovered_one_not",
+    "design": 0.5,
+    "session_id": 62,
+    "computed_value": 0.5,
+    "computed_reason": null,
+    "computed_evidence": {
+      "errors": 2,
+      "recovered": 1
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S2.4",
+    "scenario": "no_errors_encountered",
+    "design": null,
+    "session_id": 63,
+    "computed_value": null,
+    "computed_reason": "no execution errors encountered",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.1",
+    "scenario": "low_score",
+    "design": 0.1,
+    "session_id": 64,
+    "computed_value": 0.1,
+    "computed_reason": null,
+    "computed_evidence": {
+      "response_length": 38
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.1",
+    "scenario": "high_score",
+    "design": 0.95,
+    "session_id": 65,
+    "computed_value": 0.95,
+    "computed_reason": null,
+    "computed_evidence": {
+      "response_length": 38
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.1",
+    "scenario": "out_of_range",
+    "design": 1.0,
+    "session_id": 66,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "response_length": 38
+    },
+    "notes": "expected value is the clamped scripted score",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.1",
+    "scenario": "no_concept_check_submitted",
+    "design": null,
+    "session_id": 67,
+    "computed_value": null,
+    "computed_reason": "no concept-check explanation submitted for this session",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.2",
+    "scenario": "clean_exit_with_output",
+    "design": 1.0,
+    "session_id": 68,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 0,
+      "timed_out": false,
+      "has_output": true
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.2",
+    "scenario": "no_op_pass_program",
+    "design": 0.0,
+    "session_id": 69,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 0,
+      "timed_out": false,
+      "has_output": false
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.2",
+    "scenario": "uncaught_exception",
+    "design": 0.0,
+    "session_id": 70,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 1,
+      "timed_out": false,
+      "has_output": false
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.2",
+    "scenario": "clean_exit_no_output_at_all",
+    "design": 0.0,
+    "session_id": 71,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 0,
+      "timed_out": false,
+      "has_output": false
+    },
+    "notes": "expected value is the known closed-form answer",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.2",
+    "scenario": "no_code_executed",
+    "design": null,
+    "session_id": 72,
+    "computed_value": null,
+    "computed_reason": "no code was executed in this session",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.3",
+    "scenario": "ordinary_lab_session_not_applicable",
+    "design": null,
+    "session_id": 73,
+    "computed_value": null,
+    "computed_reason": "this session is not a Knowledge Transfer assessment for any Lab",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.3",
+    "scenario": "transfer_task_clean_run",
+    "design": 1.0,
+    "session_id": 74,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 0,
+      "timed_out": false,
+      "has_output": true
+    },
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.3",
+    "scenario": "transfer_task_failed_run",
+    "design": 0.0,
+    "session_id": 75,
+    "computed_value": 0.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 1,
+      "timed_out": false,
+      "has_output": false
+    },
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.4",
+    "scenario": "ordinary_lab_session_not_applicable",
+    "design": null,
+    "session_id": 76,
+    "computed_value": null,
+    "computed_reason": "this session is not a Retention & Independent Recall assessment for any Lab",
+    "computed_evidence": {},
+    "notes": "",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.4",
+    "scenario": "attempted_immediately_zero_delay",
+    "design": null,
+    "session_id": 78,
+    "computed_value": null,
+    "computed_reason": "attempted only 0.0h after the original lab activity \u2014 needs at least 24h to count as a delayed retention check",
+    "computed_evidence": {},
+    "notes": "expects None with a reason naming the 24h minimum delay",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.4",
+    "scenario": "attempted_after_30h_delay_clean_run",
+    "design": 1.0,
+    "session_id": 80,
+    "computed_value": 1.0,
+    "computed_reason": null,
+    "computed_evidence": {
+      "final_exit_status": 0,
+      "timed_out": false,
+      "has_output": true,
+      "delay_hours": 30.0
+    },
+    "notes": "30h backdated delay, well past the 24h minimum",
+    "deterministic_across_5_runs": true
+  },
+  {
+    "signal": "S3.4",
+    "scenario": "attempted_at_23h_just_under_threshold",
+    "design": null,
+    "session_id": 82,
+    "computed_value": null,
+    "computed_reason": "attempted only 23.0h after the original lab activity \u2014 needs at least 24h to count as a delayed retention check",
+    "computed_evidence": {},
+    "notes": "23h backdated delay, 1h short of the 24h minimum",
+    "deterministic_across_5_runs": true
+  }
+]
